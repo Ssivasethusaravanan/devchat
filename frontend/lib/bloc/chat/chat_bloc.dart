@@ -216,7 +216,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // Listen to WebSocket messages
     _wsSubscription = _wsService.messageStream.listen((data) {
       final type = data['type'] as String?;
-      if (type == 'new_message' && data['payload'] != null) {
+      if (type == 'message' && data['payload'] != null) {
         final payload = data['payload'] as Map<String, dynamic>;
         if (payload['message'] != null) {
           final msg = MessageModel.fromJson(payload['message']);
