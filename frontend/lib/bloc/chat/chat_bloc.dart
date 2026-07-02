@@ -301,6 +301,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   Future<void> _onLoadMessages(ChatLoadMessages event, Emitter<ChatState> emit) async {
+    _wsService.joinRoom(event.conversationId);
     try {
       final response = await _apiService.getMessages(event.conversationId, page: event.page);
       if (response['success'] == true && response['data'] != null) {
@@ -334,6 +335,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   void _onSendMessage(ChatSendMessage event, Emitter<ChatState> emit) {
+    _wsService.joinRoom(event.conversationId);
     _wsService.sendChatMessage(
       conversationId: event.conversationId,
       content: event.content,

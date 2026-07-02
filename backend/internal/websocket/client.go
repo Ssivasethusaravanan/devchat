@@ -257,6 +257,15 @@ func (c *Client) handleNewMessage(wsMsg *WSMessage) {
 		return
 	}
 
+	// Ensure all conversation members are joined to this room in the hub before broadcasting
+	if memberIDs, err := c.chatService.GetConversationMemberIDs(ctx, convID); err == nil {
+		for _, memberID := range memberIDs {
+			c.hub.JoinRoom(convID, memberID)
+		}
+	} else {
+		c.hub.JoinRoom(convID, c.UserID)
+	}
+
 	// Broadcast to all users in the conversation
 	c.hub.BroadcastToRoom(convID, outBytes, c.UserID)
 }
