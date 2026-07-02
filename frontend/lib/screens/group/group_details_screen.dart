@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../bloc/chat/chat_bloc.dart';
 import '../../models/conversation.dart';
 import '../../models/user.dart';
 import '../../services/api_service.dart';
@@ -40,14 +42,24 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Group Details'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded),
-          onPressed: () => context.pop(),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          context.read<ChatBloc>().add(ChatLoadConversations());
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Group Details'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_rounded),
+            onPressed: () {
+              context.read<ChatBloc>().add(ChatLoadConversations());
+              context.pop();
+            },
+          ),
         ),
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _group == null
@@ -111,6 +123,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> {
                     ],
                   ),
                 ),
+      ),
     );
   }
 
@@ -155,7 +168,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen> {
                         title: Text(results[i].username),
                         onTap: () async {
                           final resp = await ApiService().addGroupMember(widget.groupId, results[i].username);
-                          if (resp['success'] == true) {
+                          if (dialogContext.mounted && resp['success'] == true) {
                             Navigator.pop(dialogContext);
                             _loadGroup();
                           }

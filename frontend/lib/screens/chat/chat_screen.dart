@@ -179,15 +179,22 @@ class _ChatScreenState extends State<ChatScreen> {
     final authState = context.read<AuthBloc>().state;
     final currentUserId = authState is AuthAuthenticated ? authState.user.id : '';
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_rounded),
-          onPressed: () {
-            context.read<ChatBloc>().add(ChatLoadConversations());
-            context.go('/');
-          },
-        ),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          context.read<ChatBloc>().add(ChatLoadConversations());
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_rounded),
+            onPressed: () {
+              context.read<ChatBloc>().add(ChatLoadConversations());
+              context.go('/');
+            },
+          ),
         title: Row(
           children: [
             Container(
@@ -326,6 +333,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _buildInputBar(theme, chatExt),
         ],
       ),
+    ),
     );
   }
 

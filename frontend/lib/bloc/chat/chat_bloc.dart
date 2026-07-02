@@ -196,6 +196,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   // Cache conversations for quick updates
   List<ConversationModel> _conversations = [];
+  List<ConversationModel> get cachedConversations => _conversations;
 
   ChatBloc() : super(ChatInitial()) {
     on<ChatLoadConversations>(_onLoadConversations);
@@ -215,7 +216,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // Listen to WebSocket messages
     _wsSubscription = _wsService.messageStream.listen((data) {
       final type = data['type'] as String?;
-      if (type == 'message' && data['payload'] != null) {
+      if (type == 'new_message' && data['payload'] != null) {
         final payload = data['payload'] as Map<String, dynamic>;
         if (payload['message'] != null) {
           final msg = MessageModel.fromJson(payload['message']);
@@ -262,18 +263,24 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   Future<void> _onLoadConversations(ChatLoadConversations event, Emitter<ChatState> emit) async {
-    emit(ChatLoading());
+    if (_conversations.isEmpty) {
+      emit(ChatLoading());
+    } else {
+      emit(ChatConversationsLoaded(conversations: _conversations));
+    }
     try {
       final response = await _apiService.getConversations();
       if (response['success'] == true) {
         final data = response['data'] as List<dynamic>? ?? [];
         _conversations = data.map((c) => ConversationModel.fromJson(c)).toList();
         emit(ChatConversationsLoaded(conversations: _conversations));
-      } else {
+      } else if (_conversations.isEmpty) {
         emit(ChatError(message: response['error'] ?? 'Failed to load conversations'));
       }
     } catch (e) {
-      emit(ChatError(message: 'Failed to load conversations'));
+      if (_conversations.isEmpty) {
+        emit(ChatError(message: 'Failed to load conversations'));
+      }
     }
   }
 

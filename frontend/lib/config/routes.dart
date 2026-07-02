@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../bloc/auth/auth_bloc.dart';
 import '../screens/auth/login_screen.dart';
@@ -11,10 +13,24 @@ import '../screens/chat/chat_screen.dart';
 import '../screens/group/create_group_screen.dart';
 import '../screens/group/group_details_screen.dart';
 
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    notifyListeners();
+    _subscription = stream.asBroadcastStream().listen((_) => notifyListeners());
+  }
+  late final StreamSubscription<dynamic> _subscription;
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
+
 class AppRouter {
   static GoRouter router(AuthBloc authBloc) {
     return GoRouter(
       initialLocation: '/login',
+      refreshListenable: GoRouterRefreshStream(authBloc.stream),
       redirect: (context, state) {
         final authState = authBloc.state;
         final isAuth = authState is AuthAuthenticated;

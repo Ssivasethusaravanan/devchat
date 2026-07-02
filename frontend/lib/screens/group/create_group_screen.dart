@@ -89,7 +89,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 prefixIcon: Icon(Icons.search),
               ),
               onChanged: (query) async {
-                if (query.length >= 1) {
+                if (query.isNotEmpty) {
                   final response = await ApiService().searchUsers(query);
                   if (response['success'] == true) {
                     final data = response['data'] as List<dynamic>? ?? [];

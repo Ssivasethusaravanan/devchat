@@ -82,15 +82,21 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: BlocBuilder<ChatBloc, ChatState>(
         builder: (context, state) {
-          if (state is ChatLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          final cached = context.read<ChatBloc>().cachedConversations;
 
           if (state is ChatConversationsLoaded) {
             if (state.conversations.isEmpty) {
               return _buildEmptyState(theme);
             }
             return _buildConversationList(state.conversations, theme, chatExt);
+          }
+
+          if (cached.isNotEmpty) {
+            return _buildConversationList(cached, theme, chatExt);
+          }
+
+          if (state is ChatLoading) {
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (state is ChatError) {
@@ -116,19 +122,76 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           // New DM
-          FloatingActionButton.small(
-            heroTag: 'new_dm',
-            onPressed: () => _showNewDMDialog(context),
-            child: const Icon(Icons.person_add_alt_1),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [theme.colorScheme.secondary, theme.colorScheme.primary],
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.secondary.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => _showNewDMDialog(context),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 20),
+                      SizedBox(width: 8),
+                      Text('New DM', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           // New Group
-          FloatingActionButton(
-            heroTag: 'new_group',
-            onPressed: () => context.go('/create-group'),
-            child: const Icon(Icons.group_add),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [theme.colorScheme.primary, const Color(0xFF6366F1)],
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => context.go('/create-group'),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.group_add_rounded, color: Colors.white, size: 22),
+                      SizedBox(width: 8),
+                      Text('New Group', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -137,33 +200,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSkeletonLoading(ThemeData theme) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       itemCount: 6,
       itemBuilder: (context, index) {
         return Shimmer.fromColors(
           baseColor: theme.brightness == Brightness.dark ? const Color(0xFF1C2333) : const Color(0xFFE8ECF2),
           highlightColor: theme.brightness == Brightness.dark ? const Color(0xFF2C3548) : const Color(0xFFF7F8FC),
-          child: Card(
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Container(width: 52, height: 52, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(width: 140, height: 16, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8))),
-                        const SizedBox(height: 8),
-                        Container(width: double.infinity, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6))),
-                      ],
-                    ),
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                Container(width: 54, height: 54, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16))),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(width: 150, height: 16, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8))),
+                      const SizedBox(height: 10),
+                      Container(width: double.infinity, height: 12, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6))),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -173,33 +237,44 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [theme.colorScheme.primary.withValues(alpha: 0.2), theme.colorScheme.secondary.withValues(alpha: 0.1)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 130,
+              height: 130,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [theme.colorScheme.primary.withValues(alpha: 0.25), theme.colorScheme.secondary.withValues(alpha: 0.15)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(40),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+                border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3), width: 1.5),
               ),
-              shape: BoxShape.circle,
+              child: Center(
+                child: Icon(Icons.forum_rounded, size: 60, color: theme.colorScheme.primary),
+              ),
             ),
-            child: Center(
-              child: Icon(Icons.chat_bubble_outline_rounded, size: 54, color: theme.colorScheme.primary),
+            const SizedBox(height: 28),
+            Text('No Active Channels', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+            const SizedBox(height: 12),
+            Text(
+              'Your communications hub is quiet. Use the speed dial actions below to connect with teammates or initiate a group channel.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color, height: 1.5),
+              textAlign: TextAlign.center,
             ),
-          ),
-          const SizedBox(height: 24),
-          Text('No conversations yet', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 10),
-          Text(
-            'Tap + below to start a DM or create a new group',
-            style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
-            textAlign: TextAlign.center,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -210,10 +285,13 @@ class _HomeScreenState extends State<HomeScreen> {
         context.read<ChatBloc>().add(ChatLoadConversations());
       },
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        itemCount: conversations.length,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        itemCount: conversations.length + 1,
         itemBuilder: (context, index) {
-          final conv = conversations[index];
+          if (index == 0) {
+            return _buildHeaderStatusStrip(theme, conversations.length);
+          }
+          final conv = conversations[index - 1];
           return _ConversationTile(
             conversation: conv,
             theme: theme,
@@ -225,6 +303,80 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildHeaderStatusStrip(ThemeData theme, int totalChats) {
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14, left: 4, right: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF1E283D), const Color(0xFF141C2E)]
+              : [const Color(0xFFF3F6FC), const Color(0xFFE8EEF8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.25), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.primary.withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.hub_rounded, color: theme.colorScheme.primary, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Active Channels & DMs',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$totalChats active conversations synced in real time',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.textTheme.bodySmall?.color),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00E676).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(color: Color(0xFF00E676), shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                const Text('ONLINE', style: TextStyle(color: Color(0xFF00C853), fontSize: 11, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -306,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _ConversationTile extends StatelessWidget {
+class _ConversationTile extends StatefulWidget {
   final ConversationModel conversation;
   final ThemeData theme;
   final ChatThemeExtension chatExt;
@@ -320,102 +472,199 @@ class _ConversationTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              // Avatar with 3D shadow
-              Container(
-                width: 52, height: 52,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: conversation.isGroup
-                        ? [theme.colorScheme.secondary, theme.colorScheme.primary]
-                        : [theme.colorScheme.primary, theme.colorScheme.primary.withValues(alpha: 0.7)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.25),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: conversation.isGroup
-                      ? const Icon(Icons.group, color: Colors.white, size: 24)
-                      : Text(
-                          conversation.initials,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 14),
+  State<_ConversationTile> createState() => _ConversationTileState();
+}
 
-              // Name & last message
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            conversation.name,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: conversation.hasUnread ? FontWeight.w800 : FontWeight.w600,
-                            ),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (conversation.lastMessage != null)
-                          Text(
-                            _formatTime(conversation.lastMessage!.createdAt),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: conversation.hasUnread ? theme.colorScheme.primary : chatExt.textSecondary,
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            conversation.lastMessagePreview,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: conversation.hasUnread ? FontWeight.w600 : FontWeight.w400,
-                            ),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (conversation.hasUnread)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '${conversation.unreadCount}',
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
+class _ConversationTileState extends State<_ConversationTile> with SingleTickerProviderStateMixin {
+  late final AnimationController _scaleController;
+  late final Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.97).animate(
+      CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scaleController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final conv = widget.conversation;
+    final theme = widget.theme;
+    final chatExt = widget.chatExt;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return ScaleTransition(
+      scale: _scaleAnimation,
+      child: GestureDetector(
+        onTapDown: (_) => _scaleController.forward(),
+        onTapUp: (_) {
+          _scaleController.reverse();
+          widget.onTap();
+        },
+        onTapCancel: () => _scaleController.reverse(),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF192030).withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: conv.hasUnread
+                  ? theme.colorScheme.primary.withValues(alpha: 0.5)
+                  : theme.dividerColor.withValues(alpha: 0.3),
+              width: conv.hasUnread ? 1.5 : 1.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: conv.hasUnread
+                    ? theme.colorScheme.primary.withValues(alpha: 0.15)
+                    : Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
             ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                // Avatar with glowing gradient & status badge
+                Stack(
+                  children: [
+                    Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: conv.isGroup
+                              ? [theme.colorScheme.secondary, theme.colorScheme.primary]
+                              : [theme.colorScheme.primary, theme.colorScheme.primary.withValues(alpha: 0.65)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: conv.isGroup
+                            ? const Icon(Icons.group_rounded, color: Colors.white, size: 26)
+                            : Text(
+                                conv.initials,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                              ),
+                      ),
+                    ),
+                    if (conv.hasUnread)
+                      Positioned(
+                        top: -2,
+                        right: -2,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00E676),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: theme.scaffoldBackgroundColor, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 16),
+
+                // Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              conv.name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: conv.hasUnread ? FontWeight.w800 : FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (conv.lastMessage != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: conv.hasUnread
+                                    ? theme.colorScheme.primary.withValues(alpha: 0.15)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                _formatTime(conv.lastMessage!.createdAt),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: conv.hasUnread ? theme.colorScheme.primary : chatExt.textSecondary,
+                                  fontWeight: conv.hasUnread ? FontWeight.w700 : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              conv.lastMessagePreview,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: conv.hasUnread ? theme.textTheme.bodyLarge?.color : chatExt.textSecondary,
+                                fontWeight: conv.hasUnread ? FontWeight.w600 : FontWeight.w400,
+                                fontSize: 13.5,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (conv.hasUnread)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${conv.unreadCount}',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded, color: theme.dividerColor.withValues(alpha: 0.6), size: 20),
+              ],
+            ),
           ),
         ),
       ),
