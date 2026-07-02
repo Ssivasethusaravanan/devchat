@@ -1,0 +1,108 @@
+package websocket
+
+import (
+	"encoding/json"
+	"time"
+
+	"codertalk-backend/internal/models"
+
+	"github.com/google/uuid"
+)
+
+// WebSocket message types
+const (
+	TypeMessage      = "message"
+	TypeTyping       = "typing"
+	TypeStopTyping   = "stop_typing"
+	TypeReadReceipt  = "read_receipt"
+	TypeJoinRoom     = "join_room"
+	TypeLeaveRoom    = "leave_room"
+	TypeUserOnline   = "user_online"
+	TypeUserOffline  = "user_offline"
+	TypeError        = "error"
+	TypeAck          = "ack"
+)
+
+// WSMessage is the envelope for all WebSocket communication.
+type WSMessage struct {
+	Type           string          `json:"type"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Timestamp      time.Time       `json:"timestamp"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling with resilient timestamp parsing.
+func (m *WSMessage) UnmarshalJSON(data []byte) error {
+	type Alias WSMessage
+	aux := &struct {
+		Timestamp string `json:"timestamp"`
+		*Alias
+	}{
+		Alias: (*Alias)(m),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Timestamp != "" {
+		t, err := time.Parse(time.RFC3339Nano, aux.Timestamp)
+		if err != nil {
+			t, err = time.Parse("2006-01-02T15:04:05.999999999", aux.Timestamp)
+		}
+		if err == nil {
+			m.Timestamp = t
+		} else {
+			m.Timestamp = time.Now()
+		}
+	} else {
+		m.Timestamp = time.Now()
+	}
+	return nil
+}
+
+// MessagePayload is the payload for a new chat message.
+type MessagePayload struct {
+	Content      string             `json:"content"`
+	ContentType  string             `json:"content_type"`
+	Language     string             `json:"language,omitempty"`
+	AttachmentID string             `json:"attachment_id,omitempty"`
+	FileName     string             `json:"file_name,omitempty"`
+	FileSize     int64              `json:"file_size,omitempty"`
+	MimeType     string             `json:"mime_type,omitempty"`
+	R2Key        string             `json:"r2_key,omitempty"`
+}
+
+// MessageBroadcast is sent to all clients in a conversation when a new message arrives.
+type MessageBroadcast struct {
+	Message models.Message `json:"message"`
+}
+
+// TypingPayload is the payload for typing indicators.
+type TypingPayload struct {
+	UserID   uuid.UUID `json:"user_id"`
+	Username string    `json:"username"`
+}
+
+// ErrorPayload is sent when an error occurs during WebSocket processing.
+type ErrorPayload struct {
+	Message string `json:"message"`
+}
+
+// NewWSMessage creates a new WSMessage with the current timestamp.
+func NewWSMessage(msgType string, conversationID string, payload interface{}) (*WSMessage, error) {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return &WSMessage{
+		Type:           msgType,
+		ConversationID: conversationID,
+		Payload:        payloadBytes,
+		Timestamp:      time.Now(),
+	}, nil
+}
+
+// Encode serializes a WSMessage to JSON bytes.
+func (m *WSMessage) Encode() ([]byte, error) {
+	return json.Marshal(m)
+}
