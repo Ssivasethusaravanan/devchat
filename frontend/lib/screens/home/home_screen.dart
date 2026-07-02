@@ -56,15 +56,26 @@ class _HomeScreenState extends State<HomeScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
-              if (value == 'logout') {
+              if (value == 'profile') {
+                context.push('/profile');
+              } else if (value == 'logout') {
                 context.read<AuthBloc>().add(AuthLogoutRequested());
                 context.go('/login');
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'logout', child: Row(
-                children: [Icon(Icons.logout, size: 20), SizedBox(width: 8), Text('Logout')],
-              )),
+              const PopupMenuItem(
+                value: 'profile',
+                child: Row(
+                  children: [Icon(Icons.person_outline_rounded, size: 20), SizedBox(width: 8), Text('Profile & Settings')],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [Icon(Icons.logout, size: 20), SizedBox(width: 8), Text('Logout')],
+                ),
+              ),
             ],
           ),
         ],

@@ -1,5 +1,57 @@
 import 'user.dart';
 
+class ReplySnippetModel {
+  final String id;
+  final String senderId;
+  final String username;
+  final String content;
+  final String contentType;
+
+  const ReplySnippetModel({
+    required this.id,
+    required this.senderId,
+    required this.username,
+    required this.content,
+    required this.contentType,
+  });
+
+  factory ReplySnippetModel.fromJson(Map<String, dynamic> json) {
+    return ReplySnippetModel(
+      id: json['id'] ?? '',
+      senderId: json['sender_id'] ?? '',
+      username: json['username'] ?? '',
+      content: json['content'] ?? '',
+      contentType: json['content_type'] ?? 'text',
+    );
+  }
+}
+
+class ReactionModel {
+  final String id;
+  final String messageId;
+  final String userId;
+  final String username;
+  final String emoji;
+
+  const ReactionModel({
+    required this.id,
+    required this.messageId,
+    required this.userId,
+    required this.username,
+    required this.emoji,
+  });
+
+  factory ReactionModel.fromJson(Map<String, dynamic> json) {
+    return ReactionModel(
+      id: json['id'] ?? '',
+      messageId: json['message_id'] ?? '',
+      userId: json['user_id'] ?? '',
+      username: json['username'] ?? '',
+      emoji: json['emoji'] ?? '',
+    );
+  }
+}
+
 class MessageModel {
   final String id;
   final String conversationId;
@@ -8,6 +60,9 @@ class MessageModel {
   final String contentType; // text, code, json, file, image
   final String language;
   final bool isEdited;
+  final String? replyToId;
+  final ReplySnippetModel? replyTo;
+  final List<ReactionModel> reactions;
   final DateTime createdAt;
   final DateTime updatedAt;
   final UserModel? sender;
@@ -21,6 +76,9 @@ class MessageModel {
     this.contentType = 'text',
     this.language = '',
     this.isEdited = false,
+    this.replyToId,
+    this.replyTo,
+    this.reactions = const [],
     required this.createdAt,
     required this.updatedAt,
     this.sender,
@@ -36,6 +94,12 @@ class MessageModel {
       contentType: json['content_type'] ?? 'text',
       language: json['language'] ?? '',
       isEdited: json['is_edited'] ?? false,
+      replyToId: json['reply_to_id'],
+      replyTo: json['reply_to'] != null ? ReplySnippetModel.fromJson(json['reply_to']) : null,
+      reactions: (json['reactions'] as List<dynamic>?)
+              ?.map((r) => ReactionModel.fromJson(r))
+              .toList() ??
+          [],
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
       updatedAt: DateTime.tryParse(json['updated_at'] ?? '') ?? DateTime.now(),
       sender: json['sender'] != null ? UserModel.fromJson(json['sender']) : null,
@@ -43,6 +107,29 @@ class MessageModel {
               ?.map((a) => AttachmentModel.fromJson(a))
               .toList() ??
           [],
+    );
+  }
+
+  MessageModel copyWith({
+    String? content,
+    bool? isEdited,
+    List<ReactionModel>? reactions,
+  }) {
+    return MessageModel(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      content: content ?? this.content,
+      contentType: contentType,
+      language: language,
+      isEdited: isEdited ?? this.isEdited,
+      replyToId: replyToId,
+      replyTo: replyTo,
+      reactions: reactions ?? this.reactions,
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      sender: sender,
+      attachments: attachments,
     );
   }
 

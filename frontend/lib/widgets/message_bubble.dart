@@ -16,12 +16,14 @@ class MessageBubble extends StatelessWidget {
   final MessageModel message;
   final bool isMine;
   final bool showSender;
+  final VoidCallback? onLongPress;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isMine,
     this.showSender = false,
+    this.onLongPress,
   });
 
   @override
@@ -29,77 +31,156 @@ class MessageBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final chatExt = theme.extension<ChatThemeExtension>()!;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: isMine ? 60 : 0,
-        right: isMine ? 0 : 60,
-        bottom: 6,
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: isMine ? 60 : 0,
+          right: isMine ? 0 : 60,
+          bottom: 6,
+        ),
+        child: Column(
+          crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Sender name (for group chats)
+            if (showSender && message.sender != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, bottom: 4),
+                child: Text(
+                  message.sender!.username,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+
+            // Message bubble
+            Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width > 900
+                    ? 650
+                    : MediaQuery.of(context).size.width * 0.85,
+              ),
+              decoration: BoxDecoration(
+                color: (message.contentType == 'code' || message.contentType == 'json')
+                    ? const Color(0xFF1E1E2E)
+                    : (isMine ? chatExt.chatBubbleSelf : chatExt.chatBubbleOther),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMine ? 16 : 4),
+                  bottomRight: Radius.circular(isMine ? 4 : 16),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: Radius.circular(isMine ? 16 : 4),
+                  bottomRight: Radius.circular(isMine ? 4 : 16),
+                ),
+                child: IntrinsicWidth(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (message.replyTo != null) _buildReplyQuote(context, theme, chatExt),
+                      _buildContent(context, theme, chatExt),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Timestamp & reactions
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (message.reactions.isNotEmpty) ...[
+                    _buildReactionsBadge(context, theme),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(
+                    '${_formatTime(message.createdAt)}${message.isEdited ? ' • edited' : ''}',
+                    style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReplyQuote(BuildContext context, ThemeData theme, ChatThemeExtension chatExt) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 8, 8, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: theme.colorScheme.primary, width: 3)),
       ),
       child: Column(
-        crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Sender name (for group chats)
-          if (showSender && message.sender != null)
-            Padding(
-              padding: const EdgeInsets.only(left: 12, bottom: 4),
-              child: Text(
-                message.sender!.username,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-
-          // Message bubble
-          Container(
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width > 900
-                  ? 650
-                  : MediaQuery.of(context).size.width * 0.85,
-            ),
-            decoration: BoxDecoration(
-              color: (message.contentType == 'code' || message.contentType == 'json')
-                  ? const Color(0xFF1E1E2E)
-                  : (isMine ? chatExt.chatBubbleSelf : chatExt.chatBubbleOther),
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(isMine ? 16 : 4),
-                bottomRight: Radius.circular(isMine ? 4 : 16),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(isMine ? 16 : 4),
-                bottomRight: Radius.circular(isMine ? 4 : 16),
-              ),
-              child: IntrinsicWidth(
-                child: _buildContent(context, theme, chatExt),
-              ),
+          Text(
+            message.replyTo!.username,
+            style: TextStyle(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
             ),
           ),
-
-          // Timestamp
-          Padding(
-            padding: const EdgeInsets.only(top: 2, left: 4, right: 4),
-            child: Text(
-              _formatTime(message.createdAt),
-              style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
+          const SizedBox(height: 2),
+          Text(
+            message.replyTo!.content,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: (isMine ? chatExt.chatTextSelf : chatExt.chatTextOther).withValues(alpha: 0.85),
+              fontSize: 12,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildReactionsBadge(BuildContext context, ThemeData theme) {
+    final counts = <String, int>{};
+    for (var r in message.reactions) {
+      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
+    }
+    return Wrap(
+      spacing: 4,
+      children: counts.entries.map((e) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: theme.colorScheme.outline.withValues(alpha: 0.3)),
+          ),
+          child: Text(
+            '${e.key} ${e.value > 1 ? e.value : ''}'.trim(),
+            style: const TextStyle(fontSize: 11),
+          ),
+        );
+      }).toList(),
     );
   }
 

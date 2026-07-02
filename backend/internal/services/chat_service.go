@@ -196,7 +196,7 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 	offset := (page - 1) * pageSize
 	rows, err := s.db.Query(ctx, `
 		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
-		       COALESCE(m.language, ''), m.is_edited, m.created_at, m.updated_at,
+		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
 		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
@@ -214,7 +214,7 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 		var msg models.Message
 		sender := &models.UserPublic{}
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-			&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.CreatedAt, &msg.UpdatedAt,
+			&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
 			&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
@@ -224,6 +224,8 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 		if msg.ContentType == "file" || msg.ContentType == "image" {
 			msg.Attachments, _ = s.getAttachments(ctx, msg.ID)
 		}
+		msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
+		msg.Reactions, _ = s.getReactions(ctx, msg.ID)
 
 		messages = append(messages, msg)
 	}
@@ -251,17 +253,17 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 }
 
 // SaveMessage persists a new message to the database.
-func (s *ChatService) SaveMessage(ctx context.Context, convID, senderID uuid.UUID, content, contentType, language string) (*models.Message, error) {
+func (s *ChatService) SaveMessage(ctx context.Context, convID, senderID uuid.UUID, content, contentType, language string, replyToID *uuid.UUID) (*models.Message, error) {
 	msg := &models.Message{}
 	sender := &models.UserPublic{}
 
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO messages (conversation_id, sender_id, content, content_type, language)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, conversation_id, sender_id, content, content_type, language, is_edited, created_at, updated_at
-	`, convID, senderID, content, contentType, language,
+		INSERT INTO messages (conversation_id, sender_id, content, content_type, language, reply_to_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, conversation_id, sender_id, content, content_type, language, is_edited, reply_to_id, created_at, updated_at
+	`, convID, senderID, content, contentType, language, replyToID,
 	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.CreatedAt, &msg.UpdatedAt)
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save message: %w", err)
 	}
@@ -272,6 +274,8 @@ func (s *ChatService) SaveMessage(ctx context.Context, convID, senderID uuid.UUI
 		senderID,
 	).Scan(&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
 	msg.Sender = sender
+	msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
+	msg.Reactions = []models.MessageReaction{}
 
 	// Update conversation's updated_at timestamp
 	_, _ = s.db.Exec(ctx,
@@ -347,7 +351,7 @@ func (s *ChatService) getLastMessage(ctx context.Context, convID uuid.UUID) (*mo
 	sender := &models.UserPublic{}
 	err := s.db.QueryRow(ctx, `
 		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
-		       COALESCE(m.language, ''), m.is_edited, m.created_at, m.updated_at,
+		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
 		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
@@ -355,12 +359,14 @@ func (s *ChatService) getLastMessage(ctx context.Context, convID uuid.UUID) (*mo
 		ORDER BY m.created_at DESC
 		LIMIT 1
 	`, convID).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.CreatedAt, &msg.UpdatedAt,
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
 		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	msg.Sender = sender
+	msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
+	msg.Reactions = []models.MessageReaction{}
 	return msg, nil
 }
 
@@ -398,4 +404,128 @@ func (s *ChatService) getAttachments(ctx context.Context, messageID uuid.UUID) (
 		attachments = append(attachments, a)
 	}
 	return attachments, nil
+}
+
+func (s *ChatService) getReplyToSnippet(ctx context.Context, replyToID *uuid.UUID) *models.MessageReplySnippet {
+	if replyToID == nil {
+		return nil
+	}
+	var snippet models.MessageReplySnippet
+	err := s.db.QueryRow(ctx, `
+		SELECT m.id, m.sender_id, u.username, m.content, m.content_type
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.id = $1
+	`, *replyToID).Scan(&snippet.ID, &snippet.SenderID, &snippet.Username, &snippet.Content, &snippet.ContentType)
+	if err != nil {
+		return nil
+	}
+	return &snippet
+}
+
+func (s *ChatService) getReactions(ctx context.Context, messageID uuid.UUID) ([]models.MessageReaction, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT mr.id, mr.message_id, mr.user_id, u.username, mr.emoji, mr.created_at
+		FROM message_reactions mr
+		JOIN users u ON u.id = mr.user_id
+		WHERE mr.message_id = $1
+		ORDER BY mr.created_at ASC
+	`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reactions []models.MessageReaction
+	for rows.Next() {
+		var r models.MessageReaction
+		if err := rows.Scan(&r.ID, &r.MessageID, &r.UserID, &r.Username, &r.Emoji, &r.CreatedAt); err != nil {
+			continue
+		}
+		reactions = append(reactions, r)
+	}
+	return reactions, nil
+}
+
+// EditMessage edits a message's content if the user is the sender.
+func (s *ChatService) EditMessage(ctx context.Context, userID, messageID uuid.UUID, newContent string) (*models.Message, error) {
+	var senderID, convID uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT sender_id, conversation_id FROM messages WHERE id = $1`, messageID).Scan(&senderID, &convID)
+	if err != nil {
+		return nil, errors.New("message not found")
+	}
+	if senderID != userID {
+		return nil, errors.New("only the sender can edit this message")
+	}
+
+	_, err = s.db.Exec(ctx, `UPDATE messages SET content = $1, is_edited = TRUE, updated_at = NOW() WHERE id = $2`, newContent, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update message: %w", err)
+	}
+
+	return s.GetMessageByID(ctx, messageID)
+}
+
+// DeleteMessage deletes a message if the user is the sender.
+func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID uuid.UUID) (uuid.UUID, error) {
+	var senderID, convID uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT sender_id, conversation_id FROM messages WHERE id = $1`, messageID).Scan(&senderID, &convID)
+	if err != nil {
+		return uuid.Nil, errors.New("message not found")
+	}
+	if senderID != userID {
+		return uuid.Nil, errors.New("only the sender can delete this message")
+	}
+
+	_, err = s.db.Exec(ctx, `DELETE FROM messages WHERE id = $1`, messageID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to delete message: %w", err)
+	}
+	return convID, nil
+}
+
+// ToggleReaction adds or removes an emoji reaction from a user on a message.
+func (s *ChatService) ToggleReaction(ctx context.Context, userID, messageID uuid.UUID, emoji string) ([]models.MessageReaction, error) {
+	// Verify user has access to message's conversation
+	var convID uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT conversation_id FROM messages WHERE id = $1`, messageID).Scan(&convID)
+	if err != nil {
+		return nil, errors.New("message not found")
+	}
+
+	var exists bool
+	err = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3)`, messageID, userID, emoji).Scan(&exists)
+	if err == nil && exists {
+		_, _ = s.db.Exec(ctx, `DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3`, messageID, userID, emoji)
+	} else {
+		_, _ = s.db.Exec(ctx, `INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)`, messageID, userID, emoji)
+	}
+
+	return s.getReactions(ctx, messageID)
+}
+
+// GetMessageByID retrieves a single message complete with sender, attachments, reply snippet, and reactions.
+func (s *ChatService) GetMessageByID(ctx context.Context, messageID uuid.UUID) (*models.Message, error) {
+	var msg models.Message
+	sender := &models.UserPublic{}
+	err := s.db.QueryRow(ctx, `
+		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
+		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
+		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.sender_id
+		WHERE m.id = $1
+	`, messageID).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
+		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	msg.Sender = sender
+	if msg.ContentType == "file" || msg.ContentType == "image" {
+		msg.Attachments, _ = s.getAttachments(ctx, msg.ID)
+	}
+	msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
+	msg.Reactions, _ = s.getReactions(ctx, msg.ID)
+	return &msg, nil
 }

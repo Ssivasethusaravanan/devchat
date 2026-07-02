@@ -34,6 +34,7 @@ class ChatSendMessage extends ChatEvent {
   final String content;
   final String contentType;
   final String? language;
+  final String? replyToId;
   final String? r2Key;
   final String? fileName;
   final int? fileSize;
@@ -43,13 +44,37 @@ class ChatSendMessage extends ChatEvent {
     required this.content,
     this.contentType = 'text',
     this.language,
+    this.replyToId,
     this.r2Key,
     this.fileName,
     this.fileSize,
     this.mimeType,
   });
   @override
-  List<Object?> get props => [conversationId, content, contentType];
+  List<Object?> get props => [conversationId, content, contentType, replyToId];
+}
+
+class ChatEditMessage extends ChatEvent {
+  final String messageId;
+  final String content;
+  ChatEditMessage({required this.messageId, required this.content});
+  @override
+  List<Object?> get props => [messageId, content];
+}
+
+class ChatDeleteMessage extends ChatEvent {
+  final String messageId;
+  ChatDeleteMessage({required this.messageId});
+  @override
+  List<Object?> get props => [messageId];
+}
+
+class ChatToggleReaction extends ChatEvent {
+  final String messageId;
+  final String emoji;
+  ChatToggleReaction({required this.messageId, required this.emoji});
+  @override
+  List<Object?> get props => [messageId, emoji];
 }
 
 class ChatMessageReceived extends ChatEvent {
@@ -57,6 +82,30 @@ class ChatMessageReceived extends ChatEvent {
   ChatMessageReceived({required this.message});
   @override
   List<Object?> get props => [message];
+}
+
+class ChatMessageEditedReceived extends ChatEvent {
+  final MessageModel message;
+  ChatMessageEditedReceived({required this.message});
+  @override
+  List<Object?> get props => [message];
+}
+
+class ChatMessageDeletedReceived extends ChatEvent {
+  final String messageId;
+  final String conversationId;
+  ChatMessageDeletedReceived({required this.messageId, required this.conversationId});
+  @override
+  List<Object?> get props => [messageId, conversationId];
+}
+
+class ChatMessageReactionReceived extends ChatEvent {
+  final String messageId;
+  final String conversationId;
+  final List<ReactionModel> reactions;
+  ChatMessageReactionReceived({required this.messageId, required this.conversationId, required this.reactions});
+  @override
+  List<Object?> get props => [messageId, conversationId, reactions];
 }
 
 class ChatTypingReceived extends ChatEvent {
@@ -153,7 +202,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatStartDM>(_onStartDM);
     on<ChatLoadMessages>(_onLoadMessages);
     on<ChatSendMessage>(_onSendMessage);
+    on<ChatEditMessage>(_onEditMessage);
+    on<ChatDeleteMessage>(_onDeleteMessage);
+    on<ChatToggleReaction>(_onToggleReaction);
     on<ChatMessageReceived>(_onMessageReceived);
+    on<ChatMessageEditedReceived>(_onMessageEditedReceived);
+    on<ChatMessageDeletedReceived>(_onMessageDeletedReceived);
+    on<ChatMessageReactionReceived>(_onMessageReactionReceived);
     on<ChatTypingReceived>(_onTypingReceived);
     on<ChatSendTyping>(_onSendTyping);
 
@@ -166,6 +221,28 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           final msg = MessageModel.fromJson(payload['message']);
           add(ChatMessageReceived(message: msg));
         }
+      } else if (type == 'message_edited' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        if (payload['message'] != null) {
+          final msg = MessageModel.fromJson(payload['message']);
+          add(ChatMessageEditedReceived(message: msg));
+        }
+      } else if (type == 'message_deleted' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        add(ChatMessageDeletedReceived(
+          messageId: payload['message_id'] ?? '',
+          conversationId: payload['conversation_id'] ?? '',
+        ));
+      } else if (type == 'message_reaction' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        final list = (payload['reactions'] as List<dynamic>? ?? [])
+            .map((r) => ReactionModel.fromJson(r))
+            .toList();
+        add(ChatMessageReactionReceived(
+          messageId: payload['message_id'] ?? '',
+          conversationId: payload['conversation_id'] ?? '',
+          reactions: list,
+        ));
       } else if (type == 'typing' && data['payload'] != null) {
         final payload = data['payload'] as Map<String, dynamic>;
         add(ChatTypingReceived(
@@ -255,11 +332,36 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       content: event.content,
       contentType: event.contentType,
       language: event.language,
+      replyToId: event.replyToId,
       r2Key: event.r2Key,
       fileName: event.fileName,
       fileSize: event.fileSize,
       mimeType: event.mimeType,
     );
+  }
+
+  Future<void> _onEditMessage(ChatEditMessage event, Emitter<ChatState> emit) async {
+    try {
+      await _apiService.editMessage(event.messageId, event.content);
+    } catch (e) {
+      // API error handled silently or via state if needed
+    }
+  }
+
+  Future<void> _onDeleteMessage(ChatDeleteMessage event, Emitter<ChatState> emit) async {
+    try {
+      await _apiService.deleteMessage(event.messageId);
+    } catch (e) {
+      // API error handled silently
+    }
+  }
+
+  Future<void> _onToggleReaction(ChatToggleReaction event, Emitter<ChatState> emit) async {
+    try {
+      await _apiService.toggleReaction(event.messageId, event.emoji);
+    } catch (e) {
+      // API error handled silently
+    }
   }
 
   void _onMessageReceived(ChatMessageReceived event, Emitter<ChatState> emit) {
@@ -279,6 +381,43 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         lastMessage: event.message,
         unreadCount: _conversations[idx].unreadCount + 1,
       );
+    }
+  }
+
+  void _onMessageEditedReceived(ChatMessageEditedReceived event, Emitter<ChatState> emit) {
+    if (state is ChatMessagesLoaded) {
+      final currentState = state as ChatMessagesLoaded;
+      if (currentState.conversationId == event.message.conversationId) {
+        final updated = currentState.messages.map((m) {
+          return m.id == event.message.id ? event.message : m;
+        }).toList();
+        emit(currentState.copyWith(messages: updated));
+      }
+    }
+  }
+
+  void _onMessageDeletedReceived(ChatMessageDeletedReceived event, Emitter<ChatState> emit) {
+    if (state is ChatMessagesLoaded) {
+      final currentState = state as ChatMessagesLoaded;
+      if (currentState.conversationId == event.conversationId) {
+        final updated = currentState.messages.where((m) => m.id != event.messageId).toList();
+        emit(currentState.copyWith(messages: updated));
+      }
+    }
+  }
+
+  void _onMessageReactionReceived(ChatMessageReactionReceived event, Emitter<ChatState> emit) {
+    if (state is ChatMessagesLoaded) {
+      final currentState = state as ChatMessagesLoaded;
+      if (currentState.conversationId == event.conversationId) {
+        final updated = currentState.messages.map((m) {
+          if (m.id == event.messageId) {
+            return m.copyWith(reactions: event.reactions);
+          }
+          return m;
+        }).toList();
+        emit(currentState.copyWith(messages: updated));
+      }
     }
   }
 

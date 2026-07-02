@@ -11,16 +11,19 @@ import (
 
 // WebSocket message types
 const (
-	TypeMessage      = "message"
-	TypeTyping       = "typing"
-	TypeStopTyping   = "stop_typing"
-	TypeReadReceipt  = "read_receipt"
-	TypeJoinRoom     = "join_room"
-	TypeLeaveRoom    = "leave_room"
-	TypeUserOnline   = "user_online"
-	TypeUserOffline  = "user_offline"
-	TypeError        = "error"
-	TypeAck          = "ack"
+	TypeMessage         = "message"
+	TypeMessageEdited   = "message_edited"
+	TypeMessageDeleted  = "message_deleted"
+	TypeMessageReaction = "message_reaction"
+	TypeTyping          = "typing"
+	TypeStopTyping      = "stop_typing"
+	TypeReadReceipt     = "read_receipt"
+	TypeJoinRoom        = "join_room"
+	TypeLeaveRoom       = "leave_room"
+	TypeUserOnline      = "user_online"
+	TypeUserOffline     = "user_offline"
+	TypeError           = "error"
+	TypeAck             = "ack"
 )
 
 // WSMessage is the envelope for all WebSocket communication.
@@ -61,19 +64,38 @@ func (m *WSMessage) UnmarshalJSON(data []byte) error {
 
 // MessagePayload is the payload for a new chat message.
 type MessagePayload struct {
-	Content      string             `json:"content"`
-	ContentType  string             `json:"content_type"`
-	Language     string             `json:"language,omitempty"`
-	AttachmentID string             `json:"attachment_id,omitempty"`
-	FileName     string             `json:"file_name,omitempty"`
-	FileSize     int64              `json:"file_size,omitempty"`
-	MimeType     string             `json:"mime_type,omitempty"`
-	R2Key        string             `json:"r2_key,omitempty"`
+	Content      string     `json:"content"`
+	ContentType  string     `json:"content_type"`
+	Language     string     `json:"language,omitempty"`
+	ReplyToID    *uuid.UUID `json:"reply_to_id,omitempty"`
+	AttachmentID string     `json:"attachment_id,omitempty"`
+	FileName     string     `json:"file_name,omitempty"`
+	FileSize     int64      `json:"file_size,omitempty"`
+	MimeType     string     `json:"mime_type,omitempty"`
+	R2Key        string     `json:"r2_key,omitempty"`
 }
 
 // MessageBroadcast is sent to all clients in a conversation when a new message arrives.
 type MessageBroadcast struct {
 	Message models.Message `json:"message"`
+}
+
+// MessageEditedBroadcast is sent when a message is edited.
+type MessageEditedBroadcast struct {
+	Message models.Message `json:"message"`
+}
+
+// MessageDeletedBroadcast is sent when a message is deleted.
+type MessageDeletedBroadcast struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+}
+
+// MessageReactionBroadcast is sent when a reaction is toggled on a message.
+type MessageReactionBroadcast struct {
+	MessageID      uuid.UUID                `json:"message_id"`
+	ConversationID uuid.UUID                `json:"conversation_id"`
+	Reactions      []models.MessageReaction `json:"reactions"`
 }
 
 // TypingPayload is the payload for typing indicators.

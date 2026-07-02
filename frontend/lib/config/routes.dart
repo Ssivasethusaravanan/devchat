@@ -3,6 +3,9 @@ import '../bloc/auth/auth_bloc.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/register_screen.dart';
 import '../screens/auth/verify_email_screen.dart';
+import '../screens/auth/forgot_password_screen.dart';
+import '../screens/auth/reset_password_screen.dart';
+import '../screens/profile/profile_screen.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/chat/chat_screen.dart';
 import '../screens/group/create_group_screen.dart';
@@ -17,6 +20,8 @@ class AppRouter {
         final isAuth = authState is AuthAuthenticated;
         final isAuthRoute = state.matchedLocation == '/login' ||
             state.matchedLocation == '/register' ||
+            state.matchedLocation == '/forgot-password' ||
+            state.matchedLocation.startsWith('/reset-password') ||
             state.matchedLocation.startsWith('/verify');
 
         if (!isAuth && !isAuthRoute) return '/login';
@@ -33,11 +38,26 @@ class AppRouter {
           builder: (context, state) => const RegisterScreen(),
         ),
         GoRoute(
+          path: '/forgot-password',
+          builder: (context, state) => const ForgotPasswordScreen(),
+        ),
+        GoRoute(
+          path: '/reset-password/:email',
+          builder: (context, state) {
+            final email = state.pathParameters['email'] ?? '';
+            return ResetPasswordScreen(email: email);
+          },
+        ),
+        GoRoute(
           path: '/verify/:email',
           builder: (context, state) {
             final email = state.pathParameters['email'] ?? '';
             return VerifyEmailScreen(email: email);
           },
+        ),
+        GoRoute(
+          path: '/profile',
+          builder: (context, state) => const ProfileScreen(),
         ),
         GoRoute(
           path: '/',

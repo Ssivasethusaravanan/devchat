@@ -146,7 +146,27 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               validator: (v) => v == null || v.isEmpty ? 'Enter your password' : null,
                               onFieldSubmitted: (_) => _login(),
                             ),
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: () => context.push('/forgot-password'),
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: Text(
+                                  'Forgot Password?',
+                                  style: TextStyle(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
 
                             // Login Button
                             BlocBuilder<AuthBloc, AuthState>(

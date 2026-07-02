@@ -58,7 +58,7 @@ func main() {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService, emailService)
 	userHandler := handlers.NewUserHandler(pool)
-	chatHandler := handlers.NewChatHandler(chatService)
+	chatHandler := handlers.NewChatHandler(chatService, hub)
 	groupHandler := handlers.NewGroupHandler(groupService)
 	uploadHandler := handlers.NewUploadHandler(storageService)
 
@@ -78,6 +78,8 @@ func main() {
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/verify-email", authHandler.VerifyEmail)
 		auth.POST("/resend-verification", authHandler.ResendVerification)
+		auth.POST("/forgot-password", authHandler.ForgotPassword)
+		auth.POST("/reset-password", authHandler.ResetPassword)
 	}
 
 	// Public file streaming route (allows browser image tags and downloads without Bearer token)
@@ -89,16 +91,22 @@ func main() {
 	{
 		// Auth
 		api.GET("/auth/me", authHandler.GetMe)
+		api.PUT("/auth/change-password", authHandler.ChangePassword)
+		api.PUT("/auth/profile", authHandler.UpdateProfile)
+		api.DELETE("/auth/account", authHandler.DeleteAccount)
 
 		// Users
 		api.GET("/users/search", userHandler.SearchUsers)
 		api.GET("/users/online", userHandler.GetOnlineUsers)
 		api.GET("/users/:id", userHandler.GetUser)
 
-		// Conversations
+		// Conversations & Messages
 		api.GET("/conversations", chatHandler.GetConversations)
 		api.POST("/conversations/dm/:user_id", chatHandler.GetOrCreateDM)
 		api.GET("/conversations/:id/messages", chatHandler.GetMessages)
+		api.PUT("/messages/:id", chatHandler.EditMessage)
+		api.DELETE("/messages/:id", chatHandler.DeleteMessage)
+		api.POST("/messages/:id/reactions", chatHandler.ToggleReaction)
 
 		// Groups
 		api.POST("/groups", groupHandler.CreateGroup)

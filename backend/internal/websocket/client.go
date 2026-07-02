@@ -227,7 +227,7 @@ func (c *Client) handleNewMessage(wsMsg *WSMessage) {
 	ctx := context.Background()
 
 	// Save message to database
-	msg, err := c.chatService.SaveMessage(ctx, convID, c.UserID, payload.Content, payload.ContentType, payload.Language)
+	msg, err := c.chatService.SaveMessage(ctx, convID, c.UserID, payload.Content, payload.ContentType, payload.Language, payload.ReplyToID)
 	if err != nil {
 		log.Printf("❌ Failed to save message: %v", err)
 		c.sendError("Failed to send message")

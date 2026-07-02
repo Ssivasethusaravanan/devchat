@@ -84,6 +84,46 @@ class ApiService {
     return await _storage.read(key: AppConstants.tokenKey);
   }
 
+  Future<Map<String, dynamic>> forgotPassword(String email) async {
+    final response = await _dio.post('/auth/forgot-password', data: {
+      'email': email,
+    });
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> resetPassword(String email, String code, String newPassword) async {
+    final response = await _dio.post('/auth/reset-password', data: {
+      'email': email,
+      'code': code,
+      'new_password': newPassword,
+    });
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> changePassword(String currentPassword, String newPassword) async {
+    final response = await _dio.put('/auth/change-password', data: {
+      'current_password': currentPassword,
+      'new_password': newPassword,
+    });
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> updateProfile({String? username, String? avatarUrl}) async {
+    final response = await _dio.put('/auth/profile', data: {
+      if (username != null && username.isNotEmpty) 'username': username,
+      if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+    });
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> deleteAccount(String password) async {
+    final response = await _dio.delete('/auth/account', data: {
+      'password': password,
+    });
+    await _storage.delete(key: AppConstants.tokenKey);
+    return response.data;
+  }
+
   // ===== Users =====
 
   Future<Map<String, dynamic>> searchUsers(String query) async {
@@ -118,6 +158,21 @@ class ApiService {
       '/conversations/$conversationId/messages',
       queryParameters: {'page': page, 'limit': limit},
     );
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> editMessage(String messageId, String content) async {
+    final response = await _dio.put('/messages/$messageId', data: {'content': content});
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> deleteMessage(String messageId) async {
+    final response = await _dio.delete('/messages/$messageId');
+    return response.data;
+  }
+
+  Future<Map<String, dynamic>> toggleReaction(String messageId, String emoji) async {
+    final response = await _dio.post('/messages/$messageId/reactions', data: {'emoji': emoji});
     return response.data;
   }
 

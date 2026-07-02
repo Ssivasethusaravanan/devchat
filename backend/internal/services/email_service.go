@@ -87,3 +87,71 @@ func (s *EmailService) SendVerificationEmail(toEmail, username, code string) err
 	log.Printf("📧 Verification email sent to %s", toEmail)
 	return nil
 }
+
+// SendPasswordResetEmail sends a 6-digit password reset code to the user's email.
+func (s *EmailService) SendPasswordResetEmail(toEmail, username, code string) error {
+	log.Printf("🔑 [DEVELOPMENT PIN] Password reset code for %s (%s): %s", username, toEmail, code)
+
+	if s.cfg.SMTPHost == "" || s.cfg.SMTPUsername == "" || s.cfg.SMTPUsername == "your-email@gmail.com" {
+		log.Println("⚠️ SMTP is not configured or uses placeholders. Email sending skipped.")
+		return nil
+	}
+
+	subject := "CoderTalk — Reset Your Password"
+	body := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f7fa; margin: 0; padding: 0; }
+        .container { max-width: 480px; margin: 40px auto; background: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #b71c1c, #d32f2f); padding: 32px; text-align: center; }
+        .header h1 { color: #ffffff; margin: 0; font-size: 28px; letter-spacing: 1px; }
+        .header p { color: #ffcdd2; margin: 8px 0 0; font-size: 14px; }
+        .content { padding: 32px; text-align: center; }
+        .greeting { color: #333; font-size: 18px; margin-bottom: 16px; }
+        .code-box { background: linear-gradient(135deg, #ffebee, #fff5f5); border: 2px dashed #d32f2f; border-radius: 12px; padding: 24px; margin: 24px 0; }
+        .code { font-size: 36px; font-weight: bold; color: #b71c1c; letter-spacing: 8px; font-family: 'Courier New', monospace; }
+        .note { color: #666; font-size: 13px; margin-top: 20px; }
+        .footer { background: #f9fafb; padding: 16px; text-align: center; border-top: 1px solid #eee; }
+        .footer p { color: #999; font-size: 12px; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔒 Password Reset</h1>
+            <p>CoderTalk Security</p>
+        </div>
+        <div class="content">
+            <p class="greeting">Hey <strong>%s</strong>,</p>
+            <p style="color: #555;">Use this verification code to reset your password:</p>
+            <div class="code-box">
+                <span class="code">%s</span>
+            </div>
+            <p class="note">This code expires in <strong>15 minutes</strong>.<br>If you didn't request a password reset, your account is still secure and you can ignore this email.</p>
+        </div>
+        <div class="footer">
+            <p>© 2025 CoderTalk — Built for developers, by developers.</p>
+        </div>
+    </div>
+</body>
+</html>
+`, username, code)
+
+	m := gomail.NewMessage()
+	m.SetHeader("From", s.cfg.SMTPFrom)
+	m.SetHeader("To", toEmail)
+	m.SetHeader("Subject", subject)
+	m.SetBody("text/html", body)
+
+	d := gomail.NewDialer(s.cfg.SMTPHost, s.cfg.SMTPPort, s.cfg.SMTPUsername, s.cfg.SMTPPassword)
+
+	if err := d.DialAndSend(m); err != nil {
+		log.Printf("❌ Failed to send password reset email to %s: %v", toEmail, err)
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	log.Printf("📧 Password reset email sent to %s", toEmail)
+	return nil
+}

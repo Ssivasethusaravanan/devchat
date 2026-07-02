@@ -46,6 +46,45 @@ class AuthResendVerificationRequested extends AuthEvent {
 
 class AuthLogoutRequested extends AuthEvent {}
 
+class AuthForgotPasswordRequested extends AuthEvent {
+  final String email;
+  AuthForgotPasswordRequested({required this.email});
+  @override
+  List<Object?> get props => [email];
+}
+
+class AuthResetPasswordRequested extends AuthEvent {
+  final String email;
+  final String code;
+  final String newPassword;
+  AuthResetPasswordRequested({required this.email, required this.code, required this.newPassword});
+  @override
+  List<Object?> get props => [email, code, newPassword];
+}
+
+class AuthChangePasswordRequested extends AuthEvent {
+  final String currentPassword;
+  final String newPassword;
+  AuthChangePasswordRequested({required this.currentPassword, required this.newPassword});
+  @override
+  List<Object?> get props => [currentPassword, newPassword];
+}
+
+class AuthUpdateProfileRequested extends AuthEvent {
+  final String? username;
+  final String? avatarUrl;
+  AuthUpdateProfileRequested({this.username, this.avatarUrl});
+  @override
+  List<Object?> get props => [username, avatarUrl];
+}
+
+class AuthDeleteAccountRequested extends AuthEvent {
+  final String password;
+  AuthDeleteAccountRequested({required this.password});
+  @override
+  List<Object?> get props => [password];
+}
+
 // ===== States =====
 abstract class AuthState extends Equatable {
   @override
@@ -89,6 +128,28 @@ class AuthVerificationResent extends AuthState {
   List<Object?> get props => [email, message];
 }
 
+class AuthForgotPasswordSent extends AuthState {
+  final String email;
+  final String message;
+  AuthForgotPasswordSent({required this.email, required this.message});
+  @override
+  List<Object?> get props => [email, message];
+}
+
+class AuthPasswordResetSuccess extends AuthState {
+  final String message;
+  AuthPasswordResetSuccess({required this.message});
+  @override
+  List<Object?> get props => [message];
+}
+
+class AuthActionSuccess extends AuthState {
+  final String message;
+  AuthActionSuccess({required this.message});
+  @override
+  List<Object?> get props => [message];
+}
+
 class AuthError extends AuthState {
   final String message;
   AuthError({required this.message});
@@ -108,6 +169,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthVerifyEmailRequested>(_onVerifyEmailRequested);
     on<AuthResendVerificationRequested>(_onResendVerification);
     on<AuthLogoutRequested>(_onLogoutRequested);
+    on<AuthForgotPasswordRequested>(_onForgotPasswordRequested);
+    on<AuthResetPasswordRequested>(_onResetPasswordRequested);
+    on<AuthChangePasswordRequested>(_onChangePasswordRequested);
+    on<AuthUpdateProfileRequested>(_onUpdateProfileRequested);
+    on<AuthDeleteAccountRequested>(_onDeleteAccountRequested);
   }
 
   Future<void> _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
@@ -209,6 +275,90 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     _wsService.disconnect();
     await _apiService.logout();
     emit(AuthUnauthenticated());
+  }
+
+  Future<void> _onForgotPasswordRequested(AuthForgotPasswordRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      final response = await _apiService.forgotPassword(event.email);
+      if (response['success'] == true) {
+        emit(AuthForgotPasswordSent(email: event.email, message: response['message'] ?? 'Reset code sent!'));
+      } else {
+        emit(AuthError(message: response['error'] ?? 'Failed to send reset code'));
+      }
+    } catch (e) {
+      emit(AuthError(message: _extractErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onResetPasswordRequested(AuthResetPasswordRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      final response = await _apiService.resetPassword(event.email, event.code, event.newPassword);
+      if (response['success'] == true) {
+        emit(AuthPasswordResetSuccess(message: response['message'] ?? 'Password reset successfully!'));
+      } else {
+        emit(AuthError(message: response['error'] ?? 'Failed to reset password'));
+      }
+    } catch (e) {
+      emit(AuthError(message: _extractErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onChangePasswordRequested(AuthChangePasswordRequested event, Emitter<AuthState> emit) async {
+    final currentState = state;
+    emit(AuthLoading());
+    try {
+      final response = await _apiService.changePassword(event.currentPassword, event.newPassword);
+      if (response['success'] == true) {
+        emit(AuthActionSuccess(message: response['message'] ?? 'Password updated successfully.'));
+        if (currentState is AuthAuthenticated) {
+          emit(currentState);
+        }
+      } else {
+        emit(AuthError(message: response['error'] ?? 'Failed to update password'));
+        if (currentState is AuthAuthenticated) emit(currentState);
+      }
+    } catch (e) {
+      emit(AuthError(message: _extractErrorMessage(e)));
+      if (currentState is AuthAuthenticated) emit(currentState);
+    }
+  }
+
+  Future<void> _onUpdateProfileRequested(AuthUpdateProfileRequested event, Emitter<AuthState> emit) async {
+    final currentState = state;
+    emit(AuthLoading());
+    try {
+      final response = await _apiService.updateProfile(username: event.username, avatarUrl: event.avatarUrl);
+      if (response['success'] == true && response['data'] != null) {
+        final updatedUser = UserModel.fromJson(response['data']);
+        emit(AuthActionSuccess(message: response['message'] ?? 'Profile updated successfully.'));
+        if (currentState is AuthAuthenticated) {
+          emit(AuthAuthenticated(user: updatedUser, token: currentState.token));
+        }
+      } else {
+        emit(AuthError(message: response['error'] ?? 'Failed to update profile'));
+        if (currentState is AuthAuthenticated) emit(currentState);
+      }
+    } catch (e) {
+      emit(AuthError(message: _extractErrorMessage(e)));
+      if (currentState is AuthAuthenticated) emit(currentState);
+    }
+  }
+
+  Future<void> _onDeleteAccountRequested(AuthDeleteAccountRequested event, Emitter<AuthState> emit) async {
+    emit(AuthLoading());
+    try {
+      final response = await _apiService.deleteAccount(event.password);
+      if (response['success'] == true) {
+        _wsService.disconnect();
+        emit(AuthUnauthenticated());
+      } else {
+        emit(AuthError(message: response['error'] ?? 'Failed to delete account'));
+      }
+    } catch (e) {
+      emit(AuthError(message: _extractErrorMessage(e)));
+    }
   }
 
   String _extractErrorMessage(dynamic error) {

@@ -26,9 +26,16 @@ func RunMigrations(pool *pgxpool.Pool) error {
 			is_verified BOOLEAN DEFAULT FALSE,
 			verification_code VARCHAR(6),
 			verification_expires_at TIMESTAMPTZ,
+			reset_code VARCHAR(6),
+			reset_code_expires_at TIMESTAMPTZ,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+
+		// Add columns for existing databases
+		`ALTER TABLE users 
+			ADD COLUMN IF NOT EXISTS reset_code VARCHAR(6),
+			ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ`,
 
 		// Conversations table (supports both DMs and groups)
 		`CREATE TABLE IF NOT EXISTS conversations (
@@ -61,8 +68,21 @@ func RunMigrations(pool *pgxpool.Pool) error {
 			content_type VARCHAR(20) DEFAULT 'text' CHECK (content_type IN ('text', 'code', 'json', 'file', 'image')),
 			language VARCHAR(50) DEFAULT '',
 			is_edited BOOLEAN DEFAULT FALSE,
+			reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL`,
+
+		// Message reactions table
+		`CREATE TABLE IF NOT EXISTS message_reactions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+			user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			emoji VARCHAR(20) NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(message_id, user_id, emoji)
 		)`,
 
 		// Attachments table (linked to messages, stored in R2)
@@ -89,6 +109,7 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_conversation_members_user_id ON conversation_members(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_conversation_members_conversation_id ON conversation_members(conversation_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,

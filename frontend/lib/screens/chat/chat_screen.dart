@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:go_router/go_router.dart';
 import '../../bloc/auth/auth_bloc.dart';
 import '../../bloc/chat/chat_bloc.dart';
 import '../../config/theme.dart';
+import '../../models/message.dart';
 import '../../services/api_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/code_input_dialog.dart';
@@ -32,6 +34,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   Timer? _typingTimer;
   bool _isTyping = false;
+  MessageModel? _replyingTo;
+  MessageModel? _editingMessage;
 
   @override
   void initState() {
@@ -60,6 +64,112 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     });
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _formatDateSeparator(DateTime date) {
+    final now = DateTime.now();
+    if (_isSameDay(date, now)) return 'Today';
+    if (_isSameDay(date, now.subtract(const Duration(days: 1)))) return 'Yesterday';
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  void _showMessageContextMenu(BuildContext context, MessageModel msg, bool isMine) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(context);
+        const emojis = ['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '🚀'];
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Quick emoji reaction bar
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: emojis.map((emoji) {
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          context.read<ChatBloc>().add(ChatToggleReaction(messageId: msg.id, emoji: emoji));
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 6),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceVariant,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+
+                // Actions
+                ListTile(
+                  leading: const Icon(Icons.reply_rounded),
+                  title: const Text('Reply'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    setState(() {
+                      _replyingTo = msg;
+                      _editingMessage = null;
+                    });
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded),
+                  title: const Text('Copy Text'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Clipboard.setData(ClipboardData(text: msg.content));
+                    PremiumSnackbar.show(context, 'Copied to clipboard', isSuccess: true);
+                  },
+                ),
+                if (isMine && msg.contentType == 'text')
+                  ListTile(
+                    leading: const Icon(Icons.edit_rounded),
+                    title: const Text('Edit'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      setState(() {
+                        _editingMessage = msg;
+                        _replyingTo = null;
+                        _messageController.text = msg.content;
+                      });
+                    },
+                  ),
+                if (isMine)
+                  ListTile(
+                    leading: const Icon(Icons.delete_rounded, color: Colors.redAccent),
+                    title: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      context.read<ChatBloc>().add(ChatDeleteMessage(messageId: msg.id));
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -173,10 +283,32 @@ class _ChatScreenState extends State<ChatScreen> {
                       final showSender = !isMine && widget.type == 'group' &&
                           (index == 0 || state.messages[index - 1].senderId != msg.senderId);
 
-                      return MessageBubble(
+                      final showDate = index == 0 || !_isSameDay(state.messages[index - 1].createdAt, msg.createdAt);
+                      final bubble = MessageBubble(
                         message: msg,
                         isMine: isMine,
                         showSender: showSender,
+                        onLongPress: () => _showMessageContextMenu(context, msg, isMine),
+                      );
+
+                      if (!showDate) return bubble;
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceVariant.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              _formatDateSeparator(msg.createdAt),
+                              style: theme.textTheme.labelSmall?.copyWith(fontSize: 11),
+                            ),
+                          ),
+                          bubble,
+                        ],
                       );
                     },
                   );
@@ -187,8 +319,86 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
 
+          if (_replyingTo != null) _buildReplyPreview(theme),
+          if (_editingMessage != null) _buildEditPreview(theme),
+
           // Input bar
           _buildInputBar(theme, chatExt),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyPreview(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: theme.colorScheme.surfaceVariant.withValues(alpha: 0.5),
+      child: Row(
+        children: [
+          Icon(Icons.reply_rounded, color: theme.colorScheme.primary, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to ${_replyingTo!.sender?.username ?? 'message'}',
+                  style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                ),
+                Text(
+                  _replyingTo!.content,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 18),
+            onPressed: () => setState(() => _replyingTo = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditPreview(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+      child: Row(
+        children: [
+          Icon(Icons.edit_rounded, color: theme.colorScheme.primary, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Editing message',
+                  style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                ),
+                Text(
+                  _editingMessage!.content,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 18),
+            onPressed: () {
+              setState(() {
+                _editingMessage = null;
+                _messageController.clear();
+              });
+            },
+          ),
         ],
       ),
     );
@@ -281,6 +491,19 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    if (_editingMessage != null) {
+      context.read<ChatBloc>().add(ChatEditMessage(
+        messageId: _editingMessage!.id,
+        content: text,
+      ));
+      setState(() {
+        _editingMessage = null;
+      });
+      _messageController.clear();
+      _stopTyping();
+      return;
+    }
+
     // Auto-detect content type
     String contentType = 'text';
     if (_isValidJson(text)) {
@@ -291,8 +514,12 @@ class _ChatScreenState extends State<ChatScreen> {
       conversationId: widget.conversationId,
       content: text,
       contentType: contentType,
+      replyToId: _replyingTo?.id,
     ));
 
+    setState(() {
+      _replyingTo = null;
+    });
     _messageController.clear();
     _stopTyping();
   }
