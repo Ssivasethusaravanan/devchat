@@ -23,6 +23,8 @@ func RunMigrations(pool *pgxpool.Pool) error {
 			password_hash VARCHAR(255) NOT NULL,
 			avatar_url TEXT DEFAULT '',
 			status VARCHAR(20) DEFAULT 'offline',
+			last_seen TIMESTAMPTZ DEFAULT NOW(),
+			hide_last_seen BOOLEAN DEFAULT FALSE,
 			is_verified BOOLEAN DEFAULT FALSE,
 			verification_code VARCHAR(6),
 			verification_expires_at TIMESTAMPTZ,
@@ -35,7 +37,9 @@ func RunMigrations(pool *pgxpool.Pool) error {
 		// Add columns for existing databases
 		`ALTER TABLE users 
 			ADD COLUMN IF NOT EXISTS reset_code VARCHAR(6),
-			ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ`,
+			ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ,
+			ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ DEFAULT NOW(),
+			ADD COLUMN IF NOT EXISTS hide_last_seen BOOLEAN DEFAULT FALSE`,
 
 		// Conversations table (supports both DMs and groups)
 		`CREATE TABLE IF NOT EXISTS conversations (
@@ -68,12 +72,15 @@ func RunMigrations(pool *pgxpool.Pool) error {
 			content_type VARCHAR(20) DEFAULT 'text' CHECK (content_type IN ('text', 'code', 'json', 'file', 'image')),
 			language VARCHAR(50) DEFAULT '',
 			is_edited BOOLEAN DEFAULT FALSE,
+			status VARCHAR(20) DEFAULT 'sent',
 			reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
-		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL`,
+		`ALTER TABLE messages 
+			ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+			ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'sent'`,
 
 		// Message reactions table
 		`CREATE TABLE IF NOT EXISTS message_reactions (

@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -34,6 +35,13 @@ type Config struct {
 
 	// App
 	AppURL string
+
+	// Cookie Security
+	CookieDomain string // Domain for cookies (empty = current host, e.g. ".yourdomain.com")
+	CookieSecure bool   // Set Secure flag on cookies (true in production with HTTPS)
+
+	// CORS
+	AllowedOrigins []string // Explicit allowed origins for CORS (e.g. "https://yourdomain.com")
 }
 
 // Load reads configuration from .env file and environment variables.
@@ -45,6 +53,10 @@ func Load() *Config {
 
 	jwtExpiry, _ := strconv.Atoi(getEnv("JWT_EXPIRY_HOURS", "72"))
 	smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "587"))
+	cookieSecure, _ := strconv.ParseBool(getEnv("COOKIE_SECURE", "false"))
+
+	// Parse allowed origins from comma-separated string
+	allowedOrigins := parseAllowedOrigins(getEnv("ALLOWED_ORIGINS", ""))
 
 	return &Config{
 		ServerPort:  getEnv("SERVER_PORT", "8080"),
@@ -65,7 +77,32 @@ func Load() *Config {
 		SMTPFrom:     getEnv("SMTP_FROM", "CoderTalk <noreply@codertalk.dev>"),
 
 		AppURL: getEnv("APP_URL", "http://localhost:8080"),
+
+		CookieDomain:  getEnv("COOKIE_DOMAIN", ""),
+		CookieSecure:  cookieSecure,
+		AllowedOrigins: allowedOrigins,
 	}
+}
+
+// parseAllowedOrigins splits a comma-separated origins string into a slice.
+// If empty, defaults to localhost origins for development.
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return []string{
+			"http://localhost:8080",
+			"http://localhost:3000",
+			"http://127.0.0.1:8080",
+		}
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+	return origins
 }
 
 // Validate checks that required config values are set.

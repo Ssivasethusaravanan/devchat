@@ -15,6 +15,7 @@ const (
 	TypeMessageEdited   = "message_edited"
 	TypeMessageDeleted  = "message_deleted"
 	TypeMessageReaction = "message_reaction"
+	TypeMessageStatus   = "message_status"
 	TypeTyping          = "typing"
 	TypeStopTyping      = "stop_typing"
 	TypeReadReceipt     = "read_receipt"
@@ -102,6 +103,28 @@ type MessageReactionBroadcast struct {
 type TypingPayload struct {
 	UserID   uuid.UUID `json:"user_id"`
 	Username string    `json:"username"`
+}
+
+// UserPresencePayload is broadcast when a user comes online or goes offline.
+type UserPresencePayload struct {
+	UserID   uuid.UUID  `json:"user_id"`
+	Status   string     `json:"status"` // online or offline
+	LastSeen *time.Time `json:"last_seen,omitempty"`
+}
+
+// ReadReceiptPayload is broadcast when a user reads messages in a conversation.
+type ReadReceiptPayload struct {
+	ConversationID uuid.UUID  `json:"conversation_id"`
+	UserID         uuid.UUID  `json:"user_id"`
+	ReadAt         time.Time  `json:"read_at"`
+	UpToMessageID  *uuid.UUID `json:"up_to_message_id,omitempty"`
+}
+
+// MessageStatusPayload is broadcast when a message changes status (sent -> delivered -> read).
+type MessageStatusPayload struct {
+	MessageID      uuid.UUID `json:"message_id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Status         string    `json:"status"`
 }
 
 // ErrorPayload is sent when an error occurs during WebSocket processing.

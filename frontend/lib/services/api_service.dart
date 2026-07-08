@@ -1,10 +1,16 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/constants.dart';
+import 'cookie_reader.dart';
 
 class ApiService {
   late final Dio _dio;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
+
+  /// Whether the user is authenticated (for web, where we can't read HttpOnly cookies).
+  bool _isAuthenticated = false;
+  bool get isAuthenticated => _isAuthenticated;
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -17,11 +23,31 @@ class ApiService {
       headers: {'Content-Type': 'application/json'},
     ));
 
+    if (kIsWeb) {
+      // Web: Configure Dio to send cookies automatically with every request.
+      // This is required for the HttpOnly access_token cookie to be included.
+      configureDioForWeb(_dio);
+    }
+
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final token = await _storage.read(key: AppConstants.tokenKey);
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
+        if (kIsWeb) {
+          // Web: The browser sends the HttpOnly access_token cookie automatically.
+          // We just need to send the CSRF token header for mutating requests.
+          final method = options.method.toUpperCase();
+          if (method == 'POST' || method == 'PUT' || method == 'PATCH' || method == 'DELETE') {
+            final csrfToken = getCsrfTokenFromCookie();
+            if (csrfToken != null && csrfToken.isNotEmpty) {
+              options.headers['X-CSRF-Token'] = csrfToken;
+            }
+          }
+        } else {
+          // Mobile: Send JWT via Authorization header + identify as mobile client
+          options.headers['X-Client-Type'] = 'mobile';
+          final token = await _storage.read(key: AppConstants.tokenKey);
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
         }
         handler.next(options);
       },
@@ -30,6 +56,7 @@ class ApiService {
       },
     ));
   }
+
 
   // ===== Auth =====
 
@@ -49,8 +76,18 @@ class ApiService {
     });
 
     if (response.data['success'] == true && response.data['data'] != null) {
-      final token = response.data['data']['token'];
-      await _storage.write(key: AppConstants.tokenKey, value: token);
+      if (kIsWeb) {
+        // Web: The JWT is set as an HttpOnly cookie by the server (Set-Cookie header).
+        // We can't read it, but the browser will send it automatically.
+        // Just track that we're authenticated.
+        _isAuthenticated = true;
+      } else {
+        // Mobile: Token is in the response body — store it securely.
+        final token = response.data['data']['token'];
+        if (token != null) {
+          await _storage.write(key: AppConstants.tokenKey, value: token);
+        }
+      }
     }
 
     return response.data;
@@ -77,10 +114,26 @@ class ApiService {
   }
 
   Future<void> logout() async {
-    await _storage.delete(key: AppConstants.tokenKey);
+    if (kIsWeb) {
+      // Web: Call the server-side logout endpoint to clear HttpOnly cookies.
+      try {
+        await _dio.post('/auth/logout');
+      } catch (_) {
+        // Best-effort — even if the call fails, clear local state
+      }
+      _isAuthenticated = false;
+    } else {
+      // Mobile: Just delete the locally stored token.
+      await _storage.delete(key: AppConstants.tokenKey);
+    }
   }
 
   Future<String?> getToken() async {
+    if (kIsWeb) {
+      // Web: We can't read the HttpOnly cookie. Return null.
+      // Auth status is determined by calling /auth/me instead.
+      return null;
+    }
     return await _storage.read(key: AppConstants.tokenKey);
   }
 
@@ -108,10 +161,11 @@ class ApiService {
     return response.data;
   }
 
-  Future<Map<String, dynamic>> updateProfile({String? username, String? avatarUrl}) async {
+  Future<Map<String, dynamic>> updateProfile({String? username, String? avatarUrl, bool? hideLastSeen}) async {
     final response = await _dio.put('/auth/profile', data: {
       if (username != null && username.isNotEmpty) 'username': username,
       if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatar_url': avatarUrl,
+      if (hideLastSeen != null) 'hide_last_seen': hideLastSeen,
     });
     return response.data;
   }
@@ -120,7 +174,11 @@ class ApiService {
     final response = await _dio.delete('/auth/account', data: {
       'password': password,
     });
-    await _storage.delete(key: AppConstants.tokenKey);
+    if (!kIsWeb) {
+      await _storage.delete(key: AppConstants.tokenKey);
+    } else {
+      _isAuthenticated = false;
+    }
     return response.data;
   }
 
@@ -250,3 +308,4 @@ class ApiService {
     return response.data;
   }
 }
+

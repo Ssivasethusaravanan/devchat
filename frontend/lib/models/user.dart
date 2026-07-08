@@ -4,6 +4,8 @@ class UserModel {
   final String email;
   final String avatarUrl;
   final String status;
+  final DateTime? lastSeen;
+  final bool hideLastSeen;
   final DateTime createdAt;
 
   const UserModel({
@@ -12,6 +14,8 @@ class UserModel {
     required this.email,
     this.avatarUrl = '',
     this.status = 'offline',
+    this.lastSeen,
+    this.hideLastSeen = false,
     required this.createdAt,
   });
 
@@ -22,7 +26,9 @@ class UserModel {
       email: json['email'] ?? '',
       avatarUrl: json['avatar_url'] ?? '',
       status: json['status'] ?? 'offline',
-      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+      lastSeen: json['last_seen'] != null ? DateTime.tryParse(json['last_seen'])?.toLocal() : null,
+      hideLastSeen: json['hide_last_seen'] ?? false,
+      createdAt: DateTime.tryParse(json['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
     );
   }
 
@@ -32,7 +38,9 @@ class UserModel {
         'email': email,
         'avatar_url': avatarUrl,
         'status': status,
-        'created_at': createdAt.toIso8601String(),
+        'last_seen': lastSeen?.toUtc().toIso8601String(),
+        'hide_last_seen': hideLastSeen,
+        'created_at': createdAt.toUtc().toIso8601String(),
       };
 
   bool get isOnline => status == 'online';
@@ -46,13 +54,20 @@ class UserModel {
     return username.substring(0, username.length >= 2 ? 2 : 1).toUpperCase();
   }
 
-  UserModel copyWith({String? status, String? avatarUrl}) {
+  UserModel copyWith({
+    String? status,
+    String? avatarUrl,
+    DateTime? lastSeen,
+    bool? hideLastSeen,
+  }) {
     return UserModel(
       id: id,
       username: username,
       email: email,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       status: status ?? this.status,
+      lastSeen: lastSeen ?? this.lastSeen,
+      hideLastSeen: hideLastSeen ?? this.hideLastSeen,
       createdAt: createdAt,
     );
   }

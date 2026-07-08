@@ -31,17 +31,19 @@ class MessageBubble extends StatelessWidget {
     final theme = Theme.of(context);
     final chatExt = theme.extension<ChatThemeExtension>()!;
 
-    return GestureDetector(
-      onLongPress: onLongPress,
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: isMine ? 60 : 0,
-          right: isMine ? 0 : 60,
-          bottom: 6,
-        ),
-        child: Column(
-          crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: GestureDetector(
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: isMine ? 50 : 0,
+            right: isMine ? 0 : 50,
+            bottom: 8,
+          ),
+          child: Column(
+            crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
           children: [
             // Sender name (for group chats)
             if (showSender && message.sender != null)
@@ -115,12 +117,25 @@ class MessageBubble extends StatelessWidget {
                     '${_formatTime(message.createdAt)}${message.isEdited ? ' • edited' : ''}',
                     style: theme.textTheme.labelSmall?.copyWith(fontSize: 10),
                   ),
+                  if (isMine) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      message.isRead
+                          ? Icons.done_all
+                          : (message.isDelivered ? Icons.done_all : Icons.check),
+                      size: 13,
+                      color: message.isRead
+                          ? const Color(0xFF38BDF8) // Bright blue for read
+                          : theme.colorScheme.onSurface.withValues(alpha: 0.45),
+                    ),
+                  ],
                 ],
               ),
             ),
           ],
         ),
       ),
+    ),
     );
   }
 

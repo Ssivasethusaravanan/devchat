@@ -28,7 +28,10 @@ class _CodeInputDialogState extends State<CodeInputDialog> {
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 500),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width > 900 ? 800 : MediaQuery.of(context).size.width * 0.9,
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -73,11 +76,12 @@ class _CodeInputDialogState extends State<CodeInputDialog> {
                 child: TextField(
                   controller: _codeController,
                   maxLines: null,
-                  minLines: 8,
+                  minLines: 12,
+                  keyboardType: TextInputType.multiline,
                   style: GoogleFonts.robotoMono(fontSize: 13, color: const Color(0xFFE2E8F0)),
                   cursorColor: const Color(0xFF4DA8DA),
                   decoration: InputDecoration(
-                    hintText: '// Paste or type your code here...',
+                    hintText: '// Paste or type your code here (supports 1000+ lines)...',
                     hintStyle: GoogleFonts.robotoMono(fontSize: 13, color: const Color(0xFF64748B)),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,

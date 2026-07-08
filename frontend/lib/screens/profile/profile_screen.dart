@@ -146,6 +146,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 28),
 
+              // ===== Privacy Settings Section =====
+              _buildSectionHeader(context, 'Privacy Settings'),
+              const SizedBox(height: 12),
+              _buildSwitchTile(
+                context,
+                icon: Icons.visibility_off_outlined,
+                title: 'Hide Last Seen',
+                subtitle: 'Prevent others from seeing when you were last online',
+                value: user.hideLastSeen,
+                onChanged: (val) {
+                  context.read<AuthBloc>().add(AuthUpdateProfileRequested(hideLastSeen: val));
+                },
+              ),
+              const SizedBox(height: 28),
+
               // ===== Danger Zone =====
               _buildSectionHeader(context, 'Danger Zone', isDanger: true),
               const SizedBox(height: 12),
@@ -243,6 +258,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Icon(Icons.arrow_forward_ios_rounded, size: 16, color: theme.dividerColor),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: theme.colorScheme.primary),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: theme.textTheme.bodySmall),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            activeColor: theme.colorScheme.primary,
+            onChanged: onChanged,
+          ),
+        ],
       ),
     );
   }

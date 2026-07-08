@@ -125,6 +125,43 @@ class ChatSendTyping extends ChatEvent {
   List<Object?> get props => [conversationId, isTyping];
 }
 
+class ChatUserPresenceReceived extends ChatEvent {
+  final String userId;
+  final String status;
+  final DateTime? lastSeen;
+  ChatUserPresenceReceived({required this.userId, required this.status, this.lastSeen});
+  @override
+  List<Object?> get props => [userId, status, lastSeen];
+}
+
+class ChatReadReceiptReceived extends ChatEvent {
+  final String conversationId;
+  final String userId;
+  final DateTime readAt;
+  ChatReadReceiptReceived({required this.conversationId, required this.userId, required this.readAt});
+  @override
+  List<Object?> get props => [conversationId, userId, readAt];
+}
+
+class ChatMessageStatusReceived extends ChatEvent {
+  final String messageId;
+  final String conversationId;
+  final String status;
+  ChatMessageStatusReceived({required this.messageId, required this.conversationId, required this.status});
+  @override
+  List<Object?> get props => [messageId, conversationId, status];
+}
+
+class ChatSendReadReceipt extends ChatEvent {
+  final String conversationId;
+  final String? upToMessageId;
+  ChatSendReadReceipt({required this.conversationId, this.upToMessageId});
+  @override
+  List<Object?> get props => [conversationId, upToMessageId];
+}
+
+class ChatResyncRequested extends ChatEvent {}
+
 // ===== States =====
 abstract class ChatState extends Equatable {
   @override
@@ -193,6 +230,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ApiService _apiService = ApiService();
   final WebSocketService _wsService = WebSocketService();
   StreamSubscription? _wsSubscription;
+  StreamSubscription? _reconnectSubscription;
+  final Map<String, Timer> _readReceiptTimers = {};
+  final Map<String, String?> _pendingReadMessageIds = {};
 
   // Cache conversations for quick updates
   List<ConversationModel> _conversations = [];
@@ -212,6 +252,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatMessageReactionReceived>(_onMessageReactionReceived);
     on<ChatTypingReceived>(_onTypingReceived);
     on<ChatSendTyping>(_onSendTyping);
+    on<ChatUserPresenceReceived>(_onUserPresenceReceived);
+    on<ChatReadReceiptReceived>(_onReadReceiptReceived);
+    on<ChatMessageStatusReceived>(_onMessageStatusReceived);
+    on<ChatSendReadReceipt>(_onSendReadReceipt);
+    on<ChatResyncRequested>(_onResyncRequested);
+
+    // Listen to WebSocket reconnects
+    _reconnectSubscription = _wsService.onReconnected.listen((_) {
+      add(ChatResyncRequested());
+    });
 
     // Listen to WebSocket messages
     _wsSubscription = _wsService.messageStream.listen((data) {
@@ -257,6 +307,33 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           conversationId: data['conversation_id'] ?? '',
           username: payload['username'] ?? '',
           isTyping: false,
+        ));
+      } else if (type == 'user_online' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        add(ChatUserPresenceReceived(
+          userId: payload['user_id'] ?? '',
+          status: payload['status'] ?? 'online',
+        ));
+      } else if (type == 'user_offline' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        add(ChatUserPresenceReceived(
+          userId: payload['user_id'] ?? '',
+          status: payload['status'] ?? 'offline',
+          lastSeen: payload['last_seen'] != null ? DateTime.tryParse(payload['last_seen'])?.toLocal() : null,
+        ));
+      } else if (type == 'read_receipt' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        add(ChatReadReceiptReceived(
+          conversationId: payload['conversation_id'] ?? '',
+          userId: payload['user_id'] ?? '',
+          readAt: DateTime.tryParse(payload['read_at'] ?? '')?.toLocal() ?? DateTime.now(),
+        ));
+      } else if (type == 'message_status' && data['payload'] != null) {
+        final payload = data['payload'] as Map<String, dynamic>;
+        add(ChatMessageStatusReceived(
+          messageId: payload['message_id'] ?? '',
+          conversationId: payload['conversation_id'] ?? '',
+          status: payload['status'] ?? 'sent',
         ));
       }
     });
@@ -377,6 +454,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state is ChatMessagesLoaded) {
       final currentState = state as ChatMessagesLoaded;
       if (currentState.conversationId == event.message.conversationId) {
+        _wsService.sendReadReceipt(event.message.conversationId);
         emit(currentState.copyWith(
           messages: [...currentState.messages, event.message],
         ));
@@ -451,9 +529,88 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  void _onUserPresenceReceived(ChatUserPresenceReceived event, Emitter<ChatState> emit) {
+    bool changed = false;
+    _conversations = _conversations.map((conv) {
+      final updatedMembers = conv.members.map((m) {
+        if (m.id == event.userId) {
+          changed = true;
+          return m.copyWith(status: event.status, lastSeen: event.lastSeen);
+        }
+        return m;
+      }).toList();
+      if (changed) {
+        return conv.copyWith(members: updatedMembers);
+      }
+      return conv;
+    }).toList();
+
+    if (state is ChatConversationsLoaded && changed) {
+      emit(ChatConversationsLoaded(conversations: _conversations));
+    }
+  }
+
+  void _onReadReceiptReceived(ChatReadReceiptReceived event, Emitter<ChatState> emit) {
+    if (state is ChatMessagesLoaded) {
+      final currentState = state as ChatMessagesLoaded;
+      if (currentState.conversationId == event.conversationId) {
+        final updated = currentState.messages.map((m) {
+          if (m.status != 'read') {
+            return m.copyWith(status: 'read');
+          }
+          return m;
+        }).toList();
+        emit(currentState.copyWith(messages: updated));
+      }
+    }
+  }
+
+  void _onMessageStatusReceived(ChatMessageStatusReceived event, Emitter<ChatState> emit) {
+    if (state is ChatMessagesLoaded) {
+      final currentState = state as ChatMessagesLoaded;
+      if (currentState.conversationId == event.conversationId) {
+        final updated = currentState.messages.map((m) {
+          if (m.id == event.messageId) {
+            return m.copyWith(status: event.status);
+          }
+          return m;
+        }).toList();
+        emit(currentState.copyWith(messages: updated));
+      }
+    }
+  }
+
+  void _onSendReadReceipt(ChatSendReadReceipt event, Emitter<ChatState> emit) {
+    if (event.upToMessageId != null) {
+      _pendingReadMessageIds[event.conversationId] = event.upToMessageId;
+    }
+    _readReceiptTimers[event.conversationId]?.cancel();
+    _readReceiptTimers[event.conversationId] = Timer(const Duration(milliseconds: 600), () {
+      final highestMsgId = _pendingReadMessageIds[event.conversationId];
+      _wsService.sendReadReceipt(event.conversationId, upToMessageId: highestMsgId);
+      _pendingReadMessageIds.remove(event.conversationId);
+      _readReceiptTimers.remove(event.conversationId);
+    });
+  }
+
+  Future<void> _onResyncRequested(ChatResyncRequested event, Emitter<ChatState> emit) async {
+    add(ChatLoadConversations());
+    if (state is ChatMessagesLoaded) {
+      final activeConvId = (state as ChatMessagesLoaded).conversationId;
+      add(ChatLoadMessages(conversationId: activeConvId));
+      if (_pendingReadMessageIds.containsKey(activeConvId)) {
+        _wsService.sendReadReceipt(activeConvId, upToMessageId: _pendingReadMessageIds[activeConvId]);
+      }
+    }
+  }
+
   @override
   Future<void> close() {
     _wsSubscription?.cancel();
+    _reconnectSubscription?.cancel();
+    for (final t in _readReceiptTimers.values) {
+      t.cancel();
+    }
     return super.close();
   }
 }

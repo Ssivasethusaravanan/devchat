@@ -14,6 +14,8 @@ type User struct {
 	PasswordHash          string     `json:"-"`
 	AvatarURL             string     `json:"avatar_url,omitempty"`
 	Status                string     `json:"status"`
+	LastSeen              *time.Time `json:"last_seen,omitempty"`
+	HideLastSeen          bool       `json:"hide_last_seen"`
 	IsVerified            bool       `json:"is_verified"`
 	VerificationCode      string     `json:"-"`
 	VerificationExpiresAt *time.Time `json:"-"`
@@ -25,24 +27,40 @@ type User struct {
 
 // UserPublic is a safe version of User for API responses (no sensitive fields).
 type UserPublic struct {
-	ID        uuid.UUID `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	AvatarURL string    `json:"avatar_url,omitempty"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           uuid.UUID  `json:"id"`
+	Username     string     `json:"username"`
+	Email        string     `json:"email"`
+	AvatarURL    string     `json:"avatar_url,omitempty"`
+	Status       string     `json:"status"`
+	LastSeen     *time.Time `json:"last_seen,omitempty"`
+	HideLastSeen bool       `json:"hide_last_seen"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 // ToPublic converts a User to its public representation.
 func (u *User) ToPublic() UserPublic {
-	return UserPublic{
-		ID:        u.ID,
-		Username:  u.Username,
-		Email:     u.Email,
-		AvatarURL: u.AvatarURL,
-		Status:    u.Status,
-		CreatedAt: u.CreatedAt,
+	var lastSeen *time.Time
+	if !u.HideLastSeen {
+		lastSeen = u.LastSeen
 	}
+	return UserPublic{
+		ID:           u.ID,
+		Username:     u.Username,
+		Email:        u.Email,
+		AvatarURL:    u.AvatarURL,
+		Status:       u.Status,
+		LastSeen:     lastSeen,
+		HideLastSeen: u.HideLastSeen,
+		CreatedAt:    u.CreatedAt,
+	}
+}
+
+// ResolveLastSeen enforces symmetric privacy: if either the viewer or the target hides their last seen, it returns nil.
+func ResolveLastSeen(viewerHideLastSeen bool, targetHideLastSeen bool, targetLastSeen *time.Time) *time.Time {
+	if viewerHideLastSeen || targetHideLastSeen {
+		return nil
+	}
+	return targetLastSeen
 }
 
 // RegisterRequest represents the registration payload.
@@ -89,8 +107,9 @@ type ChangePasswordRequest struct {
 
 // UpdateProfileRequest represents updating user profile.
 type UpdateProfileRequest struct {
-	Username  string `json:"username" binding:"omitempty,min=3,max=50"`
-	AvatarURL string `json:"avatar_url" binding:"omitempty"`
+	Username     string `json:"username" binding:"omitempty,min=3,max=50"`
+	AvatarURL    string `json:"avatar_url" binding:"omitempty"`
+	HideLastSeen *bool  `json:"hide_last_seen" binding:"omitempty"`
 }
 
 // DeleteAccountRequest represents account deletion confirmation payload.
@@ -100,6 +119,6 @@ type DeleteAccountRequest struct {
 
 // AuthResponse is returned after successful login.
 type AuthResponse struct {
-	Token string     `json:"token"`
+	Token string     `json:"token,omitempty"`
 	User  UserPublic `json:"user"`
 }

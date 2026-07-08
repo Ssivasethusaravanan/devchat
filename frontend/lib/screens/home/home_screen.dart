@@ -8,6 +8,7 @@ import '../../config/theme.dart';
 import '../../models/conversation.dart';
 import '../../models/user.dart';
 import '../../services/api_service.dart';
+import '../../services/websocket_service.dart';
 import 'package:shimmer/shimmer.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -80,24 +81,53 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: BlocBuilder<ChatBloc, ChatState>(
-        builder: (context, state) {
-          final cached = context.read<ChatBloc>().cachedConversations;
+      body: Column(
+        children: [
+          StreamBuilder<bool>(
+            stream: WebSocketService().connectionStream,
+            initialData: WebSocketService().isConnected,
+            builder: (context, snapshot) {
+              final isConnected = snapshot.data ?? true;
+              if (!isConnected) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+                  color: theme.colorScheme.errorContainer,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.wifi_off_rounded, size: 16, color: theme.colorScheme.onErrorContainer),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Offline • Connecting to live servers...',
+                        style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onErrorContainer, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+          Expanded(
+            child: BlocBuilder<ChatBloc, ChatState>(
+              builder: (context, state) {
+                final cached = context.read<ChatBloc>().cachedConversations;
 
-          if (state is ChatConversationsLoaded) {
-            if (state.conversations.isEmpty) {
-              return _buildEmptyState(theme);
-            }
-            return _buildConversationList(state.conversations, theme, chatExt);
-          }
+                if (state is ChatConversationsLoaded) {
+                  if (state.conversations.isEmpty) {
+                    return _buildEmptyState(theme);
+                  }
+                  return _buildConversationList(state.conversations, theme, chatExt);
+                }
 
-          if (cached.isNotEmpty) {
-            return _buildConversationList(cached, theme, chatExt);
-          }
+                if (cached.isNotEmpty) {
+                  return _buildConversationList(cached, theme, chatExt);
+                }
 
-          if (state is ChatLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+                if (state is ChatLoading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
           if (state is ChatError) {
             return Center(
@@ -120,6 +150,9 @@ class _HomeScreenState extends State<HomeScreen> {
           return _buildSkeletonLoading(theme);
         },
       ),
+    ),
+  ],
+),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -578,11 +611,36 @@ class _ConversationTileState extends State<_ConversationTile> with SingleTickerP
                           width: 14,
                           height: 14,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF00E676),
+                            color: theme.colorScheme.secondary,
                             shape: BoxShape.circle,
                             border: Border.all(color: theme.scaffoldBackgroundColor, width: 2),
                           ),
                         ),
+                      ),
+                    if (conv.isDirect)
+                      Builder(
+                        builder: (context) {
+                          final authState = context.read<AuthBloc>().state;
+                          final currentUserId = authState is AuthAuthenticated ? authState.user.id : '';
+                          final peerMatches = conv.members.where((m) => m.id != currentUserId);
+                          final peer = peerMatches.isNotEmpty ? peerMatches.first : null;
+                          if (peer != null && peer.isOnline) {
+                            return Positioned(
+                              bottom: -2,
+                              right: -2,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00E676),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: theme.scaffoldBackgroundColor, width: 2),
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
                       ),
                   ],
                 ),

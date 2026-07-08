@@ -34,6 +34,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scrollController = ScrollController();
   Timer? _typingTimer;
   bool _isTyping = false;
+  DateTime? _lastTypingSent;
   MessageModel? _replyingTo;
   MessageModel? _editingMessage;
 
@@ -41,6 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     context.read<ChatBloc>().add(ChatLoadMessages(conversationId: widget.conversationId));
+    context.read<ChatBloc>().add(ChatSendReadReceipt(conversationId: widget.conversationId));
   }
 
   @override
@@ -68,6 +70,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _formatLastSeen(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    if (_isSameDay(date, now.subtract(const Duration(days: 1)))) return 'yesterday at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   String _formatDateSeparator(DateTime date) {
@@ -197,24 +209,51 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         title: Row(
           children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: widget.type == 'group'
-                      ? [theme.colorScheme.secondary, theme.colorScheme.primary]
-                      : [theme.colorScheme.primary, theme.colorScheme.primary.withValues(alpha: 0.7)],
+            Stack(
+              children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: widget.type == 'group'
+                          ? [theme.colorScheme.secondary, theme.colorScheme.primary]
+                          : [theme.colorScheme.primary, theme.colorScheme.primary.withValues(alpha: 0.7)],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Center(
+                    child: widget.type == 'group'
+                        ? const Icon(Icons.group, color: Colors.white, size: 18)
+                        : Text(
+                            widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+                          ),
+                  ),
                 ),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Center(
-                child: widget.type == 'group'
-                    ? const Icon(Icons.group, color: Colors.white, size: 18)
-                    : Text(
-                        widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
-                      ),
-              ),
+                if (widget.type == 'direct')
+                  BlocBuilder<ChatBloc, ChatState>(
+                    builder: (context, state) {
+                      final convMatches = context.read<ChatBloc>().cachedConversations.where((c) => c.id == widget.conversationId);
+                      final conv = convMatches.isNotEmpty ? convMatches.first : null;
+                      final peerMatches = conv?.members.where((m) => m.id != currentUserId);
+                      final peer = (peerMatches != null && peerMatches.isNotEmpty) ? peerMatches.first : null;
+                      if (peer != null && peer.isOnline) {
+                        return Positioned(
+                          right: 0, bottom: 0,
+                          child: Container(
+                            width: 10, height: 10,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: theme.scaffoldBackgroundColor, width: 1.5),
+                            ),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
+              ],
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -233,6 +272,28 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                         );
                       }
+                      if (widget.type == 'direct') {
+                        final convMatches = context.read<ChatBloc>().cachedConversations.where((c) => c.id == widget.conversationId);
+                        final conv = convMatches.isNotEmpty ? convMatches.first : null;
+                        final peerMatches = conv?.members.where((m) => m.id != currentUserId);
+                        final peer = (peerMatches != null && peerMatches.isNotEmpty) ? peerMatches.first : null;
+                        if (peer != null) {
+                          if (peer.isOnline) {
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
+                                const SizedBox(width: 4),
+                                Text('Online', style: theme.textTheme.bodySmall?.copyWith(color: Colors.green, fontSize: 11)),
+                              ],
+                            );
+                          } else if (!peer.hideLastSeen && peer.lastSeen != null) {
+                            return Text('Last seen ${_formatLastSeen(peer.lastSeen!)}', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 11));
+                          } else {
+                            return Text('Offline', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 11));
+                          }
+                        }
+                      }
                       return const SizedBox.shrink();
                     },
                   ),
@@ -249,9 +310,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          // Messages
+      body: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1000),
+          child: Column(
+            children: [
+              // Messages
           Expanded(
             child: BlocConsumer<ChatBloc, ChatState>(
               listener: (context, state) {
@@ -300,18 +364,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
                       if (!showDate) return bubble;
                       return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            margin: const EdgeInsets.symmetric(vertical: 12),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceVariant.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              _formatDateSeparator(msg.createdAt),
-                              style: theme.textTheme.labelSmall?.copyWith(fontSize: 11),
+                          Center(
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surfaceVariant.withValues(alpha: 0.6),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                _formatDateSeparator(msg.createdAt),
+                                style: theme.textTheme.labelSmall?.copyWith(fontSize: 11.5, fontWeight: FontWeight.w600),
+                              ),
                             ),
                           ),
                           bubble,
@@ -333,6 +400,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _buildInputBar(theme, chatExt),
         ],
       ),
+    ),
+    ),
     ),
     );
   }
@@ -549,18 +618,28 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleTyping() {
-    if (!_isTyping) {
+    final text = _messageController.text;
+    if (text.isEmpty) {
+      _stopTyping();
+      return;
+    }
+
+    final now = DateTime.now();
+    if (!_isTyping || _lastTypingSent == null || now.difference(_lastTypingSent!) > const Duration(seconds: 3)) {
       _isTyping = true;
+      _lastTypingSent = now;
       context.read<ChatBloc>().add(ChatSendTyping(conversationId: widget.conversationId, isTyping: true));
     }
 
     _typingTimer?.cancel();
-    _typingTimer = Timer(const Duration(seconds: 2), _stopTyping);
+    _typingTimer = Timer(const Duration(seconds: 3), _stopTyping);
   }
 
   void _stopTyping() {
+    _typingTimer?.cancel();
     if (_isTyping) {
       _isTyping = false;
+      _lastTypingSent = null;
       context.read<ChatBloc>().add(ChatSendTyping(conversationId: widget.conversationId, isTyping: false));
     }
   }

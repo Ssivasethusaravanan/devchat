@@ -173,11 +173,11 @@ func (s *AuthService) ResendVerification(ctx context.Context, email string) (str
 func (s *AuthService) Login(ctx context.Context, req models.LoginRequest) (*models.AuthResponse, error) {
 	user := &models.User{}
 	err := s.db.QueryRow(ctx,
-		`SELECT id, username, email, password_hash, avatar_url, status, is_verified, created_at, updated_at
+		`SELECT id, username, email, password_hash, avatar_url, status, last_seen, hide_last_seen, is_verified, created_at, updated_at
 		 FROM users WHERE username = $1`,
 		req.Username,
 	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.AvatarURL,
-		&user.Status, &user.IsVerified, &user.CreatedAt, &user.UpdatedAt)
+		&user.Status, &user.LastSeen, &user.HideLastSeen, &user.IsVerified, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("invalid username or password")
@@ -216,11 +216,11 @@ func (s *AuthService) Login(ctx context.Context, req models.LoginRequest) (*mode
 func (s *AuthService) GetCurrentUser(ctx context.Context, userID uuid.UUID) (*models.UserPublic, error) {
 	user := &models.User{}
 	err := s.db.QueryRow(ctx,
-		`SELECT id, username, email, avatar_url, status, is_verified, created_at, updated_at
+		`SELECT id, username, email, avatar_url, status, last_seen, hide_last_seen, is_verified, created_at, updated_at
 		 FROM users WHERE id = $1`,
 		userID,
 	).Scan(&user.ID, &user.Username, &user.Email, &user.AvatarURL, &user.Status,
-		&user.IsVerified, &user.CreatedAt, &user.UpdatedAt)
+		&user.LastSeen, &user.HideLastSeen, &user.IsVerified, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("user not found")
@@ -328,8 +328,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, curr
 	return err
 }
 
-// UpdateProfile updates username and/or avatar_url.
-func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, username, avatarURL string) (*models.UserPublic, error) {
+// UpdateProfile updates username and/or avatar_url and/or hide_last_seen.
+func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, username, avatarURL string, hideLastSeen *bool) (*models.UserPublic, error) {
 	if username != "" {
 		var exists bool
 		err := s.db.QueryRow(ctx,
@@ -355,15 +355,26 @@ func (s *AuthService) UpdateProfile(ctx context.Context, userID uuid.UUID, usern
 		args = append(args, avatarURL)
 		argId++
 	}
+	if hideLastSeen != nil {
+		query += fmt.Sprintf(", hide_last_seen = $%d", argId)
+		args = append(args, *hideLastSeen)
+		argId++
+	}
 
-	query += fmt.Sprintf(" WHERE id = $%d RETURNING id, username, email, COALESCE(avatar_url, ''), status, created_at", argId)
+	query += fmt.Sprintf(" WHERE id = $%d RETURNING id, username, email, COALESCE(avatar_url, ''), status, last_seen, hide_last_seen, created_at", argId)
 	args = append(args, userID)
 
 	var pub models.UserPublic
-	err := s.db.QueryRow(ctx, query, args...).Scan(&pub.ID, &pub.Username, &pub.Email, &pub.AvatarURL, &pub.Status, &pub.CreatedAt)
+	var lastSeen *time.Time
+	var hide bool
+	err := s.db.QueryRow(ctx, query, args...).Scan(&pub.ID, &pub.Username, &pub.Email, &pub.AvatarURL, &pub.Status, &lastSeen, &hide, &pub.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update profile: %w", err)
 	}
+	if !hide {
+		pub.LastSeen = lastSeen
+	}
+	pub.HideLastSeen = hide
 
 	return &pub, nil
 }

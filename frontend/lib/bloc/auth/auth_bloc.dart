@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../models/user.dart';
@@ -73,9 +74,10 @@ class AuthChangePasswordRequested extends AuthEvent {
 class AuthUpdateProfileRequested extends AuthEvent {
   final String? username;
   final String? avatarUrl;
-  AuthUpdateProfileRequested({this.username, this.avatarUrl});
+  final bool? hideLastSeen;
+  AuthUpdateProfileRequested({this.username, this.avatarUrl, this.hideLastSeen});
   @override
-  List<Object?> get props => [username, avatarUrl];
+  List<Object?> get props => [username, avatarUrl, hideLastSeen];
 }
 
 class AuthDeleteAccountRequested extends AuthEvent {
@@ -179,20 +181,35 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   Future<void> _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      final token = await _apiService.getToken();
-      if (token == null) {
-        emit(AuthUnauthenticated());
-        return;
-      }
-
-      final response = await _apiService.getMe();
-      if (response['success'] == true && response['data'] != null) {
-        final user = UserModel.fromJson(response['data']);
-        _wsService.connect(token);
-        emit(AuthAuthenticated(user: user, token: token));
+      if (kIsWeb) {
+        // Web: Can't read HttpOnly cookies — just call /auth/me directly.
+        // The browser sends the access_token cookie automatically.
+        final response = await _apiService.getMe();
+        if (response['success'] == true && response['data'] != null) {
+          final user = UserModel.fromJson(response['data']);
+          _wsService.connect(); // No token needed — cookies handle auth
+          emit(AuthAuthenticated(user: user, token: ''));
+        } else {
+          await _apiService.logout();
+          emit(AuthUnauthenticated());
+        }
       } else {
-        await _apiService.logout();
-        emit(AuthUnauthenticated());
+        // Mobile: Check for stored token first
+        final token = await _apiService.getToken();
+        if (token == null) {
+          emit(AuthUnauthenticated());
+          return;
+        }
+
+        final response = await _apiService.getMe();
+        if (response['success'] == true && response['data'] != null) {
+          final user = UserModel.fromJson(response['data']);
+          _wsService.connect(token);
+          emit(AuthAuthenticated(user: user, token: token));
+        } else {
+          await _apiService.logout();
+          emit(AuthUnauthenticated());
+        }
       }
     } catch (e) {
       await _apiService.logout();
@@ -206,9 +223,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final response = await _apiService.login(event.username, event.password);
       if (response['success'] == true && response['data'] != null) {
         final user = UserModel.fromJson(response['data']['user']);
-        final token = response['data']['token'];
-        _wsService.connect(token);
-        emit(AuthAuthenticated(user: user, token: token));
+        if (kIsWeb) {
+          // Web: Token is in HttpOnly cookie (not in response body).
+          // Connect WS without token — cookies sent automatically.
+          _wsService.connect();
+          emit(AuthAuthenticated(user: user, token: ''));
+        } else {
+          // Mobile: Token is in the response body.
+          final token = response['data']['token'] ?? '';
+          _wsService.connect(token);
+          emit(AuthAuthenticated(user: user, token: token));
+        }
       } else {
         emit(AuthError(message: response['error'] ?? 'Login failed'));
       }
@@ -329,7 +354,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     final currentState = state;
     emit(AuthLoading());
     try {
-      final response = await _apiService.updateProfile(username: event.username, avatarUrl: event.avatarUrl);
+      final response = await _apiService.updateProfile(username: event.username, avatarUrl: event.avatarUrl, hideLastSeen: event.hideLastSeen);
       if (response['success'] == true && response['data'] != null) {
         final updatedUser = UserModel.fromJson(response['data']);
         emit(AuthActionSuccess(message: response['message'] ?? 'Profile updated successfully.'));

@@ -26,35 +26,62 @@ const (
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 
-	// Maximum message size allowed from peer.
-	maxMessageSize = 65536 // 64KB
+	// Maximum message size allowed from peer (10MB to support large code snippets).
+	maxMessageSize = 10485760 // 10MB
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
-	},
+// newUpgrader creates a WebSocket upgrader with origin checking based on allowed origins.
+func newUpgrader(allowedOrigins []string) websocket.Upgrader {
+	originSet := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		originSet[o] = true
+	}
+
+	return websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// No origin header = non-browser client (mobile), allow
+				return true
+			}
+			return originSet[origin]
+		},
+	}
 }
 
 // Client represents a single WebSocket connection.
 type Client struct {
-	hub         *Hub
-	conn        *websocket.Conn
-	send        chan []byte
-	UserID      uuid.UUID
-	Username    string
-	chatService *services.ChatService
+	hub          *Hub
+	conn         *websocket.Conn
+	send         chan []byte
+	UserID       uuid.UUID
+	Username     string
+	HideLastSeen bool
+	Rooms        []uuid.UUID
+	chatService  *services.ChatService
 }
 
 // ServeWS handles WebSocket upgrade requests.
-// Authenticates via ?token=<jwt> query parameter.
-func ServeWS(hub *Hub, chatService *services.ChatService, jwtSecret string, c *gin.Context) {
-	// Authenticate via query parameter
-	tokenString := c.Query("token")
+// Authenticates via:
+// 1. "access_token" cookie (web clients — browser sends cookies automatically)
+// 2. ?token=<jwt> query parameter (mobile clients)
+func ServeWS(hub *Hub, chatService *services.ChatService, jwtSecret string, allowedOrigins []string, c *gin.Context) {
+	var tokenString string
+
+	// Strategy 1: Try to read JWT from the access_token HttpOnly cookie
+	if cookie, err := c.Cookie("access_token"); err == nil && cookie != "" {
+		tokenString = cookie
+	}
+
+	// Strategy 2: Fall back to query parameter (mobile clients)
 	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token required"})
+		tokenString = c.Query("token")
+	}
+
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
@@ -68,39 +95,41 @@ func ServeWS(hub *Hub, chatService *services.ChatService, jwtSecret string, c *g
 		return
 	}
 
-	// Upgrade to WebSocket
+	// Upgrade to WebSocket with origin checking
+	upgrader := newUpgrader(allowedOrigins)
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("❌ WebSocket upgrade failed: %v", err)
 		return
 	}
 
+	ctx := context.Background()
+	var rooms []uuid.UUID
+	var hideLastSeen bool
+	if chatService != nil {
+		conversations, err := chatService.GetConversations(ctx, claims.UserID)
+		if err == nil {
+			rooms = make([]uuid.UUID, len(conversations))
+			for i, conv := range conversations {
+				rooms[i] = conv.ID
+			}
+		}
+		hideLastSeen = chatService.GetHideLastSeen(ctx, claims.UserID)
+	}
+
 	client := &Client{
-		hub:         hub,
-		conn:        conn,
-		send:        make(chan []byte, 256),
-		UserID:      claims.UserID,
-		Username:    claims.Username,
-		chatService: chatService,
+		hub:          hub,
+		conn:         conn,
+		send:         make(chan []byte, 256),
+		UserID:       claims.UserID,
+		Username:     claims.Username,
+		HideLastSeen: hideLastSeen,
+		Rooms:        rooms,
+		chatService:  chatService,
 	}
 
 	// Register client
 	hub.register <- client
-
-	// Auto-join all user's conversation rooms
-	go func() {
-		ctx := context.Background()
-		conversations, err := chatService.GetConversations(ctx, client.UserID)
-		if err != nil {
-			log.Printf("⚠️ Failed to get conversations for auto-join: %v", err)
-			return
-		}
-		convIDs := make([]uuid.UUID, len(conversations))
-		for i, conv := range conversations {
-			convIDs[i] = conv.ID
-		}
-		hub.JoinUserRooms(client.UserID, convIDs)
-	}()
 
 	// Start read and write pumps
 	go client.writePump()
@@ -112,11 +141,6 @@ func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
 		c.conn.Close()
-
-		// Set user status to offline
-		if !c.hub.IsUserOnline(c.UserID) {
-			// User has disconnected all connections
-		}
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
@@ -244,6 +268,12 @@ func (c *Client) handleNewMessage(wsMsg *WSMessage) {
 		}
 	}
 
+	// If any peer in the room is online, mark message delivered
+	if c.hub.HasOtherOnlineMembers(convID, c.UserID) {
+		_ = c.chatService.UpdateMessageStatus(ctx, msg.ID, "delivered")
+		msg.Status = "delivered"
+	}
+
 	// Create broadcast message
 	broadcast := MessageBroadcast{Message: *msg}
 	outMsg, err := NewWSMessage(TypeMessage, wsMsg.ConversationID, broadcast)
@@ -270,34 +300,18 @@ func (c *Client) handleNewMessage(wsMsg *WSMessage) {
 	c.hub.BroadcastToRoom(convID, outBytes, c.UserID)
 }
 
-// handleTyping broadcasts typing indicators (ephemeral, not persisted).
+// handleTyping routes typing indicators through server-owned TypingManager.
 func (c *Client) handleTyping(wsMsg *WSMessage, isTyping bool) {
 	convID, err := uuid.Parse(wsMsg.ConversationID)
 	if err != nil {
 		return
 	}
 
-	msgType := TypeTyping
-	if !isTyping {
-		msgType = TypeStopTyping
+	if isTyping {
+		c.hub.TypingManager.StartTyping(convID, c.UserID, c.Username, c.hub)
+	} else {
+		c.hub.TypingManager.StopTyping(convID, c.UserID, c.hub)
 	}
-
-	payload := TypingPayload{
-		UserID:   c.UserID,
-		Username: c.Username,
-	}
-
-	outMsg, err := NewWSMessage(msgType, wsMsg.ConversationID, payload)
-	if err != nil {
-		return
-	}
-
-	outBytes, err := outMsg.Encode()
-	if err != nil {
-		return
-	}
-
-	c.hub.BroadcastToRoom(convID, outBytes, c.UserID)
 }
 
 // handleJoinRoom processes room join requests.
@@ -308,19 +322,36 @@ func (c *Client) handleJoinRoom(wsMsg *WSMessage) {
 		return
 	}
 
+	c.Rooms = append(c.Rooms, convID)
 	c.hub.JoinRoom(convID, c.UserID)
 }
 
-// handleReadReceipt updates the read status for a conversation.
+// handleReadReceipt updates the read status for a conversation up to optional cursor.
 func (c *Client) handleReadReceipt(wsMsg *WSMessage) {
 	convID, err := uuid.Parse(wsMsg.ConversationID)
 	if err != nil {
 		return
 	}
 
+	var req struct {
+		UpToMessageID *uuid.UUID `json:"up_to_message_id"`
+	}
+	_ = json.Unmarshal(wsMsg.Payload, &req)
+
 	ctx := context.Background()
-	// Update read receipt by loading messages (which updates the read_receipt)
-	_, _ = c.chatService.GetMessages(ctx, convID, c.UserID, 1, 1)
+	_ = c.chatService.MarkConversationRead(ctx, convID, c.UserID, req.UpToMessageID)
+
+	payload := ReadReceiptPayload{
+		ConversationID: convID,
+		UserID:         c.UserID,
+		ReadAt:         time.Now().UTC(),
+		UpToMessageID:  req.UpToMessageID,
+	}
+	if outMsg, err := NewWSMessage(TypeReadReceipt, wsMsg.ConversationID, payload); err == nil {
+		if outBytes, err := outMsg.Encode(); err == nil {
+			c.hub.BroadcastToRoom(convID, outBytes, c.UserID)
+		}
+	}
 }
 
 // sendError sends an error message to the client.

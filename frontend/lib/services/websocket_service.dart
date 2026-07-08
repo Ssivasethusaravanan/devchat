@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/constants.dart';
 
@@ -20,17 +21,22 @@ class WebSocketService {
 
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
+  final _reconnectedController = StreamController<void>.broadcast();
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<bool> get connectionStream => _connectionController.stream;
+  Stream<void> get onReconnected => _reconnectedController.stream;
   bool get isConnected => _isConnected;
 
   static final WebSocketService _instance = WebSocketService._internal();
   factory WebSocketService() => _instance;
   WebSocketService._internal();
 
-  /// Connect to the WebSocket server with the given JWT token.
-  void connect(String token) {
+  /// Connect to the WebSocket server.
+  /// On mobile: requires a JWT token (sent as ?token= query parameter).
+  /// On web: token is optional — the browser sends the HttpOnly access_token
+  /// cookie automatically during the WebSocket upgrade handshake.
+  void connect([String? token]) {
     _token = token;
     _shouldReconnect = true;
     _reconnectAttempts = 0;
@@ -38,10 +44,18 @@ class WebSocketService {
   }
 
   void _doConnect() {
-    if (_token == null) return;
-
     try {
-      final uri = Uri.parse('${AppConstants.wsUrl}?token=$_token');
+      Uri uri;
+      if (kIsWeb) {
+        // Web: Don't put the JWT in the URL — the browser sends the
+        // HttpOnly access_token cookie automatically with the upgrade request.
+        // This prevents the token from appearing in network tab URLs and server logs.
+        uri = Uri.parse(AppConstants.wsUrl);
+      } else {
+        // Mobile: Send token as query parameter (no cookie jar on mobile).
+        if (_token == null) return;
+        uri = Uri.parse('${AppConstants.wsUrl}?token=$_token');
+      }
       _channel = WebSocketChannel.connect(uri);
 
       _subscription = _channel!.stream.listen(
@@ -74,8 +88,13 @@ class WebSocketService {
         },
       );
 
+      bool isReconnecting = _reconnectAttempts > 0;
       _isConnected = true;
       _connectionController.add(true);
+      if (isReconnecting) {
+        _reconnectedController.add(null);
+      }
+      _reconnectAttempts = 0;
 
       // Start ping timer to keep connection alive
       _pingTimer?.cancel();
@@ -167,6 +186,17 @@ class WebSocketService {
     sendMessage(type: 'join_room', conversationId: conversationId);
   }
 
+  /// Send read receipt for a conversation up to optional cursor.
+  void sendReadReceipt(String conversationId, {String? upToMessageId}) {
+    sendMessage(
+      type: 'read_receipt',
+      conversationId: conversationId,
+      payload: {
+        if (upToMessageId != null) 'up_to_message_id': upToMessageId,
+      },
+    );
+  }
+
   /// Send raw string data.
   void sendRaw(String data) {
     if (_channel != null && _isConnected) {
@@ -192,5 +222,6 @@ class WebSocketService {
     disconnect();
     _messageController.close();
     _connectionController.close();
+    _reconnectedController.close();
   }
 }

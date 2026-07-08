@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"codertalk-backend/internal/models"
 
@@ -196,8 +197,8 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 	offset := (page - 1) * pageSize
 	rows, err := s.db.Query(ctx, `
 		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
-		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
-		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
+		       COALESCE(m.language, ''), m.is_edited, m.status, m.reply_to_id, m.created_at, m.updated_at,
+		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.last_seen, u.hide_last_seen, u.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
 		WHERE m.conversation_id = $1
@@ -213,11 +214,17 @@ func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID,
 	for rows.Next() {
 		var msg models.Message
 		sender := &models.UserPublic{}
+		var lastSeen *time.Time
+		var hideLastSeen bool
 		if err := rows.Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-			&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
-			&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt); err != nil {
+			&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.Status, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
+			&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &lastSeen, &hideLastSeen, &sender.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
+		if !hideLastSeen {
+			sender.LastSeen = lastSeen
+		}
+		sender.HideLastSeen = hideLastSeen
 		msg.Sender = sender
 
 		// Get attachments if file type
@@ -258,21 +265,27 @@ func (s *ChatService) SaveMessage(ctx context.Context, convID, senderID uuid.UUI
 	sender := &models.UserPublic{}
 
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO messages (conversation_id, sender_id, content, content_type, language, reply_to_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, conversation_id, sender_id, content, content_type, language, is_edited, reply_to_id, created_at, updated_at
+		INSERT INTO messages (conversation_id, sender_id, content, content_type, language, reply_to_id, status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'sent')
+		RETURNING id, conversation_id, sender_id, content, content_type, language, is_edited, status, reply_to_id, created_at, updated_at
 	`, convID, senderID, content, contentType, language, replyToID,
 	).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt)
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.Status, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save message: %w", err)
 	}
 
 	// Get sender info
+	var lastSeen *time.Time
+	var hideLastSeen bool
 	_ = s.db.QueryRow(ctx,
-		`SELECT id, username, email, COALESCE(avatar_url, ''), status, created_at FROM users WHERE id = $1`,
+		`SELECT id, username, email, COALESCE(avatar_url, ''), status, last_seen, hide_last_seen, created_at FROM users WHERE id = $1`,
 		senderID,
-	).Scan(&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
+	).Scan(&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &lastSeen, &hideLastSeen, &sender.CreatedAt)
+	if !hideLastSeen {
+		sender.LastSeen = lastSeen
+	}
+	sender.HideLastSeen = hideLastSeen
 	msg.Sender = sender
 	msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
 	msg.Reactions = []models.MessageReaction{}
@@ -325,7 +338,7 @@ func (s *ChatService) GetConversationMemberIDs(ctx context.Context, convID uuid.
 
 func (s *ChatService) getConversationMembers(ctx context.Context, convID uuid.UUID) ([]models.UserPublic, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
+		SELECT u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.last_seen, u.hide_last_seen, u.created_at
 		FROM users u
 		JOIN conversation_members cm ON cm.user_id = u.id
 		WHERE cm.conversation_id = $1
@@ -338,9 +351,15 @@ func (s *ChatService) getConversationMembers(ctx context.Context, convID uuid.UU
 	var members []models.UserPublic
 	for rows.Next() {
 		var m models.UserPublic
-		if err := rows.Scan(&m.ID, &m.Username, &m.Email, &m.AvatarURL, &m.Status, &m.CreatedAt); err != nil {
+		var lastSeen *time.Time
+		var hideLastSeen bool
+		if err := rows.Scan(&m.ID, &m.Username, &m.Email, &m.AvatarURL, &m.Status, &lastSeen, &hideLastSeen, &m.CreatedAt); err != nil {
 			return nil, err
 		}
+		if !hideLastSeen {
+			m.LastSeen = lastSeen
+		}
+		m.HideLastSeen = hideLastSeen
 		members = append(members, m)
 	}
 	return members, nil
@@ -349,21 +368,27 @@ func (s *ChatService) getConversationMembers(ctx context.Context, convID uuid.UU
 func (s *ChatService) getLastMessage(ctx context.Context, convID uuid.UUID) (*models.Message, error) {
 	msg := &models.Message{}
 	sender := &models.UserPublic{}
+	var lastSeen *time.Time
+	var hideLastSeen bool
 	err := s.db.QueryRow(ctx, `
 		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
-		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
-		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
+		       COALESCE(m.language, ''), m.is_edited, m.status, m.reply_to_id, m.created_at, m.updated_at,
+		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.last_seen, u.hide_last_seen, u.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
 		WHERE m.conversation_id = $1
 		ORDER BY m.created_at DESC
 		LIMIT 1
 	`, convID).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
-		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.Status, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
+		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &lastSeen, &hideLastSeen, &sender.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	if !hideLastSeen {
+		sender.LastSeen = lastSeen
+	}
+	sender.HideLastSeen = hideLastSeen
 	msg.Sender = sender
 	msg.ReplyTo = s.getReplyToSnippet(ctx, msg.ReplyToID)
 	msg.Reactions = []models.MessageReaction{}
@@ -508,19 +533,25 @@ func (s *ChatService) ToggleReaction(ctx context.Context, userID, messageID uuid
 func (s *ChatService) GetMessageByID(ctx context.Context, messageID uuid.UUID) (*models.Message, error) {
 	var msg models.Message
 	sender := &models.UserPublic{}
+	var lastSeen *time.Time
+	var hideLastSeen bool
 	err := s.db.QueryRow(ctx, `
 		SELECT m.id, m.conversation_id, m.sender_id, m.content, m.content_type,
-		       COALESCE(m.language, ''), m.is_edited, m.reply_to_id, m.created_at, m.updated_at,
-		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.created_at
+		       COALESCE(m.language, ''), m.is_edited, m.status, m.reply_to_id, m.created_at, m.updated_at,
+		       u.id, u.username, u.email, COALESCE(u.avatar_url, ''), u.status, u.last_seen, u.hide_last_seen, u.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.sender_id
 		WHERE m.id = $1
 	`, messageID).Scan(&msg.ID, &msg.ConversationID, &msg.SenderID, &msg.Content,
-		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
-		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &sender.CreatedAt)
+		&msg.ContentType, &msg.Language, &msg.IsEdited, &msg.Status, &msg.ReplyToID, &msg.CreatedAt, &msg.UpdatedAt,
+		&sender.ID, &sender.Username, &sender.Email, &sender.AvatarURL, &sender.Status, &lastSeen, &hideLastSeen, &sender.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	if !hideLastSeen {
+		sender.LastSeen = lastSeen
+	}
+	sender.HideLastSeen = hideLastSeen
 	msg.Sender = sender
 	if msg.ContentType == "file" || msg.ContentType == "image" {
 		msg.Attachments, _ = s.getAttachments(ctx, msg.ID)
@@ -529,3 +560,55 @@ func (s *ChatService) GetMessageByID(ctx context.Context, messageID uuid.UUID) (
 	msg.Reactions, _ = s.getReactions(ctx, msg.ID)
 	return &msg, nil
 }
+
+// UpdateMessageStatus updates the status of a specific message.
+func (s *ChatService) UpdateMessageStatus(ctx context.Context, messageID uuid.UUID, status string) error {
+	_, err := s.db.Exec(ctx, `UPDATE messages SET status = $1, updated_at = NOW() WHERE id = $2 AND status != 'read'`, status, messageID)
+	return err
+}
+
+// MarkConversationRead marks all unread messages in a conversation sent by others as read.
+func (s *ChatService) MarkConversationRead(ctx context.Context, convID uuid.UUID, userID uuid.UUID, upToMessageID *uuid.UUID) error {
+	_, _ = s.db.Exec(ctx,
+		`UPDATE messages SET status = 'read', updated_at = NOW()
+		 WHERE conversation_id = $1 AND sender_id != $2 AND status != 'read'
+		 AND ($3::uuid IS NULL OR created_at <= (SELECT created_at FROM messages WHERE id = $3))`,
+		convID, userID, upToMessageID,
+	)
+	_, _ = s.db.Exec(ctx,
+		`INSERT INTO read_receipts (conversation_id, user_id, last_read_at)
+		 VALUES ($1, $2, NOW())
+		 ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_at = NOW()`,
+		convID, userID,
+	)
+	return nil
+}
+
+// SetUserOnline updates a user's status to online.
+func (s *ChatService) SetUserOnline(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `UPDATE users SET status = 'online', updated_at = NOW() WHERE id = $1`, userID)
+	return err
+}
+
+// SetUserOffline updates a user's status to offline and returns the new last_seen timestamp.
+func (s *ChatService) SetUserOffline(ctx context.Context, userID uuid.UUID) (*time.Time, error) {
+	now := time.Now()
+	_, err := s.db.Exec(ctx, `UPDATE users SET status = 'offline', last_seen = $1, updated_at = NOW() WHERE id = $2`, now, userID)
+	if err != nil {
+		return nil, err
+	}
+	var hide bool
+	_ = s.db.QueryRow(ctx, `SELECT hide_last_seen FROM users WHERE id = $1`, userID).Scan(&hide)
+	if hide {
+		return nil, nil
+	}
+	return &now, nil
+}
+
+// GetHideLastSeen returns whether a user has enabled hide_last_seen.
+func (s *ChatService) GetHideLastSeen(ctx context.Context, userID uuid.UUID) bool {
+	var hide bool
+	_ = s.db.QueryRow(ctx, `SELECT hide_last_seen FROM users WHERE id = $1`, userID).Scan(&hide)
+	return hide
+}
+

@@ -60,6 +60,7 @@ class MessageModel {
   final String contentType; // text, code, json, file, image
   final String language;
   final bool isEdited;
+  final String status; // sent, delivered, read
   final String? replyToId;
   final ReplySnippetModel? replyTo;
   final List<ReactionModel> reactions;
@@ -76,6 +77,7 @@ class MessageModel {
     this.contentType = 'text',
     this.language = '',
     this.isEdited = false,
+    this.status = 'sent',
     this.replyToId,
     this.replyTo,
     this.reactions = const [],
@@ -94,14 +96,15 @@ class MessageModel {
       contentType: json['content_type'] ?? 'text',
       language: json['language'] ?? '',
       isEdited: json['is_edited'] ?? false,
+      status: json['status'] ?? 'sent',
       replyToId: json['reply_to_id'],
       replyTo: json['reply_to'] != null ? ReplySnippetModel.fromJson(json['reply_to']) : null,
       reactions: (json['reactions'] as List<dynamic>?)
               ?.map((r) => ReactionModel.fromJson(r))
               .toList() ??
           [],
-      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-      updatedAt: DateTime.tryParse(json['updated_at'] ?? '') ?? DateTime.now(),
+      createdAt: DateTime.tryParse(json['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updated_at'] ?? '')?.toLocal() ?? DateTime.now(),
       sender: json['sender'] != null ? UserModel.fromJson(json['sender']) : null,
       attachments: (json['attachments'] as List<dynamic>?)
               ?.map((a) => AttachmentModel.fromJson(a))
@@ -113,6 +116,7 @@ class MessageModel {
   MessageModel copyWith({
     String? content,
     bool? isEdited,
+    String? status,
     List<ReactionModel>? reactions,
   }) {
     return MessageModel(
@@ -123,6 +127,7 @@ class MessageModel {
       contentType: contentType,
       language: language,
       isEdited: isEdited ?? this.isEdited,
+      status: status ?? this.status,
       replyToId: replyToId,
       replyTo: replyTo,
       reactions: reactions ?? this.reactions,
@@ -141,10 +146,14 @@ class MessageModel {
         'content_type': contentType,
         'language': language,
         'is_edited': isEdited,
-        'created_at': createdAt.toIso8601String(),
-        'updated_at': updatedAt.toIso8601String(),
+        'status': status,
+        'created_at': createdAt.toUtc().toIso8601String(),
+        'updated_at': updatedAt.toUtc().toIso8601String(),
       };
 
+  bool get isSent => status == 'sent';
+  bool get isDelivered => status == 'delivered' || status == 'read';
+  bool get isRead => status == 'read';
   bool get isCode => contentType == 'code';
   bool get isJson => contentType == 'json';
   bool get isFile => contentType == 'file';

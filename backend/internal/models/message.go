@@ -34,6 +34,7 @@ type Message struct {
 	ContentType    string               `json:"content_type"` // text, code, json, file, image
 	Language       string               `json:"language,omitempty"`
 	IsEdited       bool                 `json:"is_edited"`
+	Status         string               `json:"status"` // sent, delivered, read
 	ReplyToID      *uuid.UUID           `json:"reply_to_id,omitempty"`
 	ReplyTo        *MessageReplySnippet `json:"reply_to,omitempty"`
 	Reactions      []MessageReaction    `json:"reactions,omitempty"`

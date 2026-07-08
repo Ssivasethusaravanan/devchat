@@ -56,7 +56,7 @@ func main() {
 	go hub.Run()
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(authService, emailService)
+	authHandler := handlers.NewAuthHandler(authService, emailService, cfg)
 	userHandler := handlers.NewUserHandler(pool)
 	chatHandler := handlers.NewChatHandler(chatService, hub)
 	groupHandler := handlers.NewGroupHandler(groupService)
@@ -64,7 +64,7 @@ func main() {
 
 	// Setup Gin router
 	router := gin.Default()
-	router.Use(middleware.CORSMiddleware())
+	router.Use(middleware.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
@@ -80,6 +80,7 @@ func main() {
 		auth.POST("/resend-verification", authHandler.ResendVerification)
 		auth.POST("/forgot-password", authHandler.ForgotPassword)
 		auth.POST("/reset-password", authHandler.ResetPassword)
+		auth.POST("/logout", authHandler.Logout)
 	}
 
 	// Public file streaming route (allows browser image tags and downloads without Bearer token)
@@ -123,7 +124,7 @@ func main() {
 
 	// ===== WebSocket endpoint =====
 	router.GET("/ws", func(c *gin.Context) {
-		ws.ServeWS(hub, chatService, cfg.JWTSecret, c)
+		ws.ServeWS(hub, chatService, cfg.JWTSecret, cfg.AllowedOrigins, c)
 	})
 
 	// ===== Static Web Serving (Optional Monolithic SPA Hosting) =====
