@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -113,8 +114,11 @@ func (s *StorageService) DeleteObject(key string) error {
 func (s *StorageService) SaveFileDirect(key string, content []byte, contentType string) error {
 	// 1. Always save locally to data/<key> for reliable serving without CORS or expiration
 	localPath := filepath.Join("data", key)
-	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err == nil {
-		_ = os.WriteFile(localPath, content, 0644)
+	var localErr error
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		localErr = fmt.Errorf("failed to create directory: %w", err)
+	} else if err := os.WriteFile(localPath, content, 0644); err != nil {
+		localErr = fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// 2. Also upload to R2 if configured
@@ -126,10 +130,17 @@ func (s *StorageService) SaveFileDirect(key string, content []byte, contentType 
 			ContentType: aws.String(contentType),
 		})
 		if err != nil {
-			// Even if R2 put fails, local copy exists
+			log.Printf("⚠️ Failed to upload to R2: %v", err)
+			if localErr != nil {
+				return fmt.Errorf("both local and R2 upload failed (local: %v, r2: %v)", localErr, err)
+			}
 			return nil
 		}
+	} else if localErr != nil {
+		// R2 not configured and local save failed
+		return fmt.Errorf("local file save failed and R2 is not configured: %w", localErr)
 	}
+
 	return nil
 }
 

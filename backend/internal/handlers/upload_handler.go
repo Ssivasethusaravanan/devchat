@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -100,6 +101,10 @@ func (h *UploadHandler) UploadDirect(c *gin.Context) {
 	}
 
 	fileURL := fmt.Sprintf("%s/api/files/%s", getBaseURL(c), r2Key)
+	if u, err := url.Parse(getBaseURL(c)); err == nil {
+		u.Path = "/api/files/" + r2Key
+		fileURL = u.String()
+	}
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Data: gin.H{
@@ -125,6 +130,10 @@ func (h *UploadHandler) GetPresignedDownloadURL(c *gin.Context) {
 	}
 
 	fileURL := fmt.Sprintf("%s/api/files/%s", getBaseURL(c), key)
+	if u, err := url.Parse(getBaseURL(c)); err == nil {
+		u.Path = "/api/files/" + key
+		fileURL = u.String()
+	}
 	c.JSON(http.StatusOK, models.APIResponse{
 		Success: true,
 		Data: gin.H{
