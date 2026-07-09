@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"codertalk-backend/internal/middleware"
@@ -46,7 +47,19 @@ func newUpgrader(allowedOrigins []string) websocket.Upgrader {
 				// No origin header = non-browser client (mobile), allow
 				return true
 			}
-			return originSet[origin]
+			
+			// 1. Check explicit allowed origins or wildcard
+			if originSet[origin] || originSet["*"] {
+				return true
+			}
+
+			// 2. Fallback: Automatically allow same-origin requests safely
+			u, err := url.Parse(origin)
+			if err == nil && u.Host == r.Host {
+				return true
+			}
+			
+			return false
 		},
 	}
 }
