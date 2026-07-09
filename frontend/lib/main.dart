@@ -7,8 +7,11 @@ import 'bloc/auth/auth_bloc.dart';
 import 'bloc/chat/chat_bloc.dart';
 import 'bloc/theme/theme_cubit.dart';
 
-void main() {
+import 'services/local_storage_service.dart';
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await LocalStorageService().init();
   runApp(const CoderTalkApp());
 }
 

@@ -49,6 +49,20 @@ class ConversationModel {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'type': type,
+        'name': name,
+        'description': description,
+        'avatar_url': avatarUrl,
+        'created_by': createdBy,
+        'created_at': createdAt.toUtc().toIso8601String(),
+        'updated_at': updatedAt.toUtc().toIso8601String(),
+        'members': members.map((m) => m.toJson()).toList(),
+        'last_message': lastMessage?.toJson(),
+        'unread_count': unreadCount,
+      };
+
   bool get isDirect => type == 'direct';
   bool get isGroup => type == 'group';
   bool get hasUnread => unreadCount > 0;

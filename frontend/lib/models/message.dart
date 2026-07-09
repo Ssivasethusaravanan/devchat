@@ -24,6 +24,14 @@ class ReplySnippetModel {
       contentType: json['content_type'] ?? 'text',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sender_id': senderId,
+        'username': username,
+        'content': content,
+        'content_type': contentType,
+      };
 }
 
 class ReactionModel {
@@ -50,6 +58,14 @@ class ReactionModel {
       emoji: json['emoji'] ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'message_id': messageId,
+        'user_id': userId,
+        'username': username,
+        'emoji': emoji,
+      };
 }
 
 class MessageModel {
@@ -147,8 +163,13 @@ class MessageModel {
         'language': language,
         'is_edited': isEdited,
         'status': status,
+        'reply_to_id': replyToId,
+        'reply_to': replyTo?.toJson(),
+        'reactions': reactions.map((r) => r.toJson()).toList(),
         'created_at': createdAt.toUtc().toIso8601String(),
         'updated_at': updatedAt.toUtc().toIso8601String(),
+        'sender': sender?.toJson(),
+        'attachments': attachments.map((a) => a.toJson()).toList(),
       };
 
   bool get isSent => status == 'sent';
@@ -192,6 +213,16 @@ class AttachmentModel {
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'message_id': messageId,
+        'file_name': fileName,
+        'file_size': fileSize,
+        'mime_type': mimeType,
+        'r2_key': r2Key,
+        'created_at': createdAt.toUtc().toIso8601String(),
+      };
 
   String get fileSizeFormatted {
     if (fileSize < 1024) return '$fileSize B';

@@ -5,6 +5,7 @@ import '../../models/conversation.dart';
 import '../../models/message.dart';
 import '../../services/api_service.dart';
 import '../../services/websocket_service.dart';
+import '../../services/local_storage_service.dart';
 
 // ===== Events =====
 abstract class ChatEvent extends Equatable {
@@ -229,6 +230,7 @@ class ChatError extends ChatState {
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final ApiService _apiService = ApiService();
   final WebSocketService _wsService = WebSocketService();
+  final LocalStorageService _localStorage = LocalStorageService();
   StreamSubscription? _wsSubscription;
   StreamSubscription? _reconnectSubscription;
   final Map<String, Timer> _readReceiptTimers = {};
@@ -239,6 +241,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   List<ConversationModel> get cachedConversations => _conversations;
 
   ChatBloc() : super(ChatInitial()) {
+    // Load initial cached conversations
+    _conversations = _localStorage.getCachedConversations();
+    
     on<ChatLoadConversations>(_onLoadConversations);
     on<ChatStartDM>(_onStartDM);
     on<ChatLoadMessages>(_onLoadMessages);
@@ -340,22 +345,34 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   Future<void> _onLoadConversations(ChatLoadConversations event, Emitter<ChatState> emit) async {
-    if (_conversations.isEmpty) {
+    if (_conversations.isEmpty && state is! ChatMessagesLoaded) {
       emit(ChatLoading());
-    } else {
+    } else if (state is! ChatMessagesLoaded) {
       emit(ChatConversationsLoaded(conversations: _conversations));
     }
+    
     try {
       final response = await _apiService.getConversations();
       if (response['success'] == true) {
         final data = response['data'] as List<dynamic>? ?? [];
         _conversations = data.map((c) => ConversationModel.fromJson(c)).toList();
-        emit(ChatConversationsLoaded(conversations: _conversations));
-      } else if (_conversations.isEmpty) {
+        
+        // Cache to local storage
+        await _localStorage.saveConversations(_conversations);
+        
+        // Join all rooms to receive live updates even when not in the chat screen
+        for (var conv in _conversations) {
+          _wsService.joinRoom(conv.id);
+        }
+        
+        if (state is! ChatMessagesLoaded) {
+          emit(ChatConversationsLoaded(conversations: _conversations));
+        }
+      } else if (_conversations.isEmpty && state is! ChatMessagesLoaded) {
         emit(ChatError(message: response['error'] ?? 'Failed to load conversations'));
       }
     } catch (e) {
-      if (_conversations.isEmpty) {
+      if (_conversations.isEmpty && state is! ChatMessagesLoaded) {
         emit(ChatError(message: 'Failed to load conversations'));
       }
     }
@@ -379,6 +396,20 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _onLoadMessages(ChatLoadMessages event, Emitter<ChatState> emit) async {
     _wsService.joinRoom(event.conversationId);
+    
+    // Load from local storage first for instant display
+    if (event.page == 1) {
+      final cachedMessages = _localStorage.getCachedMessages(event.conversationId);
+      if (cachedMessages.isNotEmpty) {
+        emit(ChatMessagesLoaded(
+          conversationId: event.conversationId,
+          messages: cachedMessages,
+          hasMore: true, // Optimistically assume true until API says otherwise
+          page: 1,
+        ));
+      }
+    }
+    
     try {
       final response = await _apiService.getMessages(event.conversationId, page: event.page);
       if (response['success'] == true && response['data'] != null) {
@@ -395,6 +426,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           if (currentState.conversationId == event.conversationId) {
             allMessages = [...messages, ...currentState.messages];
           }
+        }
+        
+        if (event.page == 1) {
+          await _localStorage.saveMessages(event.conversationId, allMessages);
         }
 
         emit(ChatMessagesLoaded(
@@ -455,9 +490,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       final currentState = state as ChatMessagesLoaded;
       if (currentState.conversationId == event.message.conversationId) {
         _wsService.sendReadReceipt(event.message.conversationId);
-        emit(currentState.copyWith(
-          messages: [...currentState.messages, event.message],
-        ));
+        
+        // Prevent duplicate messages if API loaded it and WebSocket also received it
+        final exists = currentState.messages.any((m) => m.id == event.message.id);
+        if (!exists) {
+          final newMessages = [...currentState.messages, event.message];
+          _localStorage.saveMessages(event.message.conversationId, newMessages);
+          emit(currentState.copyWith(messages: newMessages));
+        }
       }
     }
 
@@ -468,6 +508,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         lastMessage: event.message,
         unreadCount: _conversations[idx].unreadCount + 1,
       );
+      _localStorage.saveConversations(_conversations);
+      
+      if (state is ChatConversationsLoaded) {
+        emit(ChatConversationsLoaded(conversations: _conversations));
+      }
     }
   }
 
@@ -545,8 +590,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       return conv;
     }).toList();
 
-    if (state is ChatConversationsLoaded && changed) {
-      emit(ChatConversationsLoaded(conversations: _conversations));
+    if (changed) {
+      _localStorage.saveConversations(_conversations);
+      if (state is ChatConversationsLoaded) {
+        emit(ChatConversationsLoaded(conversations: _conversations));
+      }
     }
   }
 

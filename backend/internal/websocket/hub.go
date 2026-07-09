@@ -75,13 +75,16 @@ func (h *Hub) Run() {
 			log.Printf("👤 Client registered: %s (%s)", client.Username, client.UserID)
 
 			if wentOnline && client.chatService != nil {
-				go func(userID uuid.UUID, rooms []uuid.UUID, hide bool) {
+				go func(userID uuid.UUID, hide bool) {
 					ctx := context.Background()
 					_ = client.chatService.SetUserOnline(ctx, userID)
-					for _, convID := range rooms {
-						h.BroadcastPresenceToRoom(convID, userID, "online", nil, hide)
+					rooms, err := client.chatService.GetUserConversationIDs(ctx, userID)
+					if err == nil {
+						for _, convID := range rooms {
+							h.BroadcastPresenceToRoom(convID, userID, "online", nil, hide)
+						}
 					}
-				}(client.UserID, client.Rooms, client.HideLastSeen)
+				}(client.UserID, client.HideLastSeen)
 			}
 
 		case client := <-h.unregister:
@@ -110,13 +113,16 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 			if wentOffline && client.chatService != nil {
-				go func(userID uuid.UUID, rooms []uuid.UUID, hide bool) {
+				go func(userID uuid.UUID, hide bool) {
 					ctx := context.Background()
 					lastSeen, _ := client.chatService.SetUserOffline(ctx, userID)
-					for _, convID := range rooms {
-						h.BroadcastPresenceToRoom(convID, userID, "offline", lastSeen, hide)
+					rooms, err := client.chatService.GetUserConversationIDs(ctx, userID)
+					if err == nil {
+						for _, convID := range rooms {
+							h.BroadcastPresenceToRoom(convID, userID, "offline", lastSeen, hide)
+						}
 					}
-				}(client.UserID, userRooms, client.HideLastSeen)
+				}(client.UserID, client.HideLastSeen)
 			}
 			log.Printf("👤 Client unregistered: %s (%s)", client.Username, client.UserID)
 

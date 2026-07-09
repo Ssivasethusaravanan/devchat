@@ -25,6 +25,8 @@ const (
 	TypeUserOffline     = "user_offline"
 	TypeError           = "error"
 	TypeAck             = "ack"
+	TypePing            = "ping"
+	TypePong            = "pong"
 )
 
 // WSMessage is the envelope for all WebSocket communication.

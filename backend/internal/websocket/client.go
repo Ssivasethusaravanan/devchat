@@ -159,6 +159,9 @@ func (c *Client) readPump() {
 			break
 		}
 
+		// Extend the read deadline whenever ANY message is received to prevent unexpected disconnects.
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+
 		// Parse the incoming message
 		var wsMsg WSMessage
 		if err := json.Unmarshal(rawMessage, &wsMsg); err != nil {
@@ -229,6 +232,8 @@ func (c *Client) handleMessage(wsMsg *WSMessage) {
 		c.handleJoinRoom(wsMsg)
 	case TypeReadReceipt:
 		c.handleReadReceipt(wsMsg)
+	case TypePing:
+		c.send <- []byte(`{"type":"pong"}`)
 	default:
 		c.sendError("Unknown message type: " + wsMsg.Type)
 	}

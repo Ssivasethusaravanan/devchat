@@ -173,6 +173,28 @@ func (s *ChatService) GetConversation(ctx context.Context, convID, userID uuid.U
 	return conv, nil
 }
 
+// GetUserConversationIDs returns a list of all conversation IDs that a user is a member of.
+func (s *ChatService) GetUserConversationIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT conversation_id 
+		FROM conversation_members 
+		WHERE user_id = $1
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user conversation IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var convIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err == nil {
+			convIDs = append(convIDs, id)
+		}
+	}
+	return convIDs, nil
+}
+
 // GetMessages returns paginated messages for a conversation.
 func (s *ChatService) GetMessages(ctx context.Context, convID, userID uuid.UUID, page, pageSize int) (*models.MessageListResponse, error) {
 	// Verify user is a member
