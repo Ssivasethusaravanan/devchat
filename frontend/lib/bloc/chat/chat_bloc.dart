@@ -144,6 +144,14 @@ class ChatReadReceiptReceived extends ChatEvent {
   List<Object?> get props => [conversationId, userId, readAt];
 }
 
+class ChatSendReadReceipt extends ChatEvent {
+  final String conversationId;
+  final String? upToMessageId;
+  ChatSendReadReceipt({required this.conversationId, this.upToMessageId});
+  @override
+  List<Object?> get props => [conversationId, upToMessageId];
+}
+
 class ChatMessageStatusReceived extends ChatEvent {
   final String messageId;
   final String conversationId;
@@ -182,21 +190,24 @@ class ChatConversationsLoaded extends ChatState {
 
 class ChatMessagesLoaded extends ChatState {
   final String conversationId;
+  final ConversationModel conversation;
   final List<MessageModel> messages;
   final bool hasMore;
   final int page;
   final Map<String, String> typingUsers; // conversationId -> username
   ChatMessagesLoaded({
     required this.conversationId,
+    required this.conversation,
     required this.messages,
     this.hasMore = true,
     this.page = 1,
     this.typingUsers = const {},
   });
   @override
-  List<Object?> get props => [conversationId, messages, hasMore, page, typingUsers];
+  List<Object?> get props => [conversationId, conversation, messages, hasMore, page, typingUsers];
 
   ChatMessagesLoaded copyWith({
+    ConversationModel? conversation,
     List<MessageModel>? messages,
     bool? hasMore,
     int? page,
@@ -204,6 +215,7 @@ class ChatMessagesLoaded extends ChatState {
   }) {
     return ChatMessagesLoaded(
       conversationId: conversationId,
+      conversation: conversation ?? this.conversation,
       messages: messages ?? this.messages,
       hasMore: hasMore ?? this.hasMore,
       page: page ?? this.page,
@@ -401,8 +413,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (event.page == 1) {
       final cachedMessages = _localStorage.getCachedMessages(event.conversationId);
       if (cachedMessages.isNotEmpty) {
+        final conv = _conversations.firstWhere(
+          (c) => c.id == event.conversationId,
+          orElse: () => ConversationModel(id: event.conversationId, name: 'Unknown', type: 'direct', members: [], createdBy: '', createdAt: DateTime.now(), updatedAt: DateTime.now()),
+        );
         emit(ChatMessagesLoaded(
           conversationId: event.conversationId,
+          conversation: conv,
           messages: cachedMessages,
           hasMore: true, // Optimistically assume true until API says otherwise
           page: 1,
@@ -432,8 +449,14 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           await _localStorage.saveMessages(event.conversationId, allMessages);
         }
 
+        final conv = _conversations.firstWhere(
+          (c) => c.id == event.conversationId,
+          orElse: () => ConversationModel(id: event.conversationId, name: 'Unknown', type: 'direct', members: [], createdBy: '', createdAt: DateTime.now(), updatedAt: DateTime.now()),
+        );
+
         emit(ChatMessagesLoaded(
           conversationId: event.conversationId,
+          conversation: conv,
           messages: allMessages,
           hasMore: hasMore,
           page: event.page,
@@ -594,6 +617,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       _localStorage.saveConversations(_conversations);
       if (state is ChatConversationsLoaded) {
         emit(ChatConversationsLoaded(conversations: _conversations));
+      } else if (state is ChatMessagesLoaded) {
+        final current = state as ChatMessagesLoaded;
+        final matchingConv = _conversations.firstWhere(
+          (c) => c.id == current.conversationId,
+          orElse: () => current.conversation,
+        );
+        emit(current.copyWith(conversation: matchingConv));
       }
     }
   }

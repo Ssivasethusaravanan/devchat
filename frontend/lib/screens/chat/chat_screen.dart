@@ -233,10 +233,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (widget.type == 'direct')
                   BlocBuilder<ChatBloc, ChatState>(
                     builder: (context, state) {
-                      final convMatches = context.read<ChatBloc>().cachedConversations.where((c) => c.id == widget.conversationId);
-                      final conv = convMatches.isNotEmpty ? convMatches.first : null;
-                      final peerMatches = conv?.members.where((m) => m.id != currentUserId);
-                      final peer = (peerMatches != null && peerMatches.isNotEmpty) ? peerMatches.first : null;
+                      if (state is ChatMessagesLoaded) {
+                        final peerMatches = state.conversation.members.where((m) => m.id != currentUserId);
+                        final peer = peerMatches.isNotEmpty ? peerMatches.first : null;
                       if (peer != null && peer.isOnline) {
                         return Positioned(
                           right: 0, bottom: 0,
@@ -249,6 +248,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                           ),
                         );
+                      }
                       }
                       return const SizedBox.shrink();
                     },
@@ -273,10 +273,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         );
                       }
                       if (widget.type == 'direct') {
-                        final convMatches = context.read<ChatBloc>().cachedConversations.where((c) => c.id == widget.conversationId);
-                        final conv = convMatches.isNotEmpty ? convMatches.first : null;
-                        final peerMatches = conv?.members.where((m) => m.id != currentUserId);
-                        final peer = (peerMatches != null && peerMatches.isNotEmpty) ? peerMatches.first : null;
+                        if (state is ChatMessagesLoaded) {
+                          final peerMatches = state.conversation.members.where((m) => m.id != currentUserId);
+                          final peer = peerMatches.isNotEmpty ? peerMatches.first : null;
                         if (peer != null) {
                           if (peer.isOnline) {
                             return Row(
@@ -293,7 +292,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             return Text('Offline', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurface.withValues(alpha: 0.5), fontSize: 11));
                           }
                         }
-                      }
+                        }
                       return const SizedBox.shrink();
                     },
                   ),
