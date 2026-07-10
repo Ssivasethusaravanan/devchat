@@ -64,7 +64,6 @@ func main() {
 
 	// Setup Gin router
 	router := gin.Default()
-	router.Use(middleware.CORSMiddleware(cfg.AllowedOrigins))
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
@@ -73,6 +72,7 @@ func main() {
 
 	// ===== Public routes (no auth) =====
 	auth := router.Group("/api/auth")
+	auth.Use(middleware.CORSMiddleware(cfg.AllowedOrigins))
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
@@ -85,9 +85,16 @@ func main() {
 
 	// Public file streaming route (allows browser image tags and downloads without Bearer token)
 	router.GET("/api/files/*key", uploadHandler.ServeFile)
+	router.OPTIONS("/api/files/*key", func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "*")
+		c.Status(204)
+	})
 
 	// ===== Protected routes (auth required) =====
 	api := router.Group("/api")
+	api.Use(middleware.CORSMiddleware(cfg.AllowedOrigins))
 	api.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	{
 		// Auth

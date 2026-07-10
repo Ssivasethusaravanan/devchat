@@ -163,5 +163,8 @@ func (h *UploadHandler) ServeFile(c *gin.Context) {
 		}
 	}
 
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Header("Access-Control-Allow-Headers", "*")
 	http.ServeFile(c.Writer, c.Request, localPath)
 }

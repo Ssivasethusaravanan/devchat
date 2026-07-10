@@ -161,13 +161,7 @@ class ChatMessageStatusReceived extends ChatEvent {
   List<Object?> get props => [messageId, conversationId, status];
 }
 
-class ChatSendReadReceipt extends ChatEvent {
-  final String conversationId;
-  final String? upToMessageId;
-  ChatSendReadReceipt({required this.conversationId, this.upToMessageId});
-  @override
-  List<Object?> get props => [conversationId, upToMessageId];
-}
+
 
 class ChatResyncRequested extends ChatEvent {}
 
